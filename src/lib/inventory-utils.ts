@@ -93,3 +93,74 @@ export async function deductStockFEFO(params: {
     newStockQuantity: updatedProduct.stockQuantity,
   };
 }
+
+/**
+ * Hoàn kho chuẩn xác về đúng các lô hàng đã trừ khi Quản lý Hủy hóa đơn / Trả hàng Shop (Rule 11).
+ */
+export async function restoreStockFromInvoiceCancel(params: {
+  invoiceId: string;
+  invoiceCode: string;
+  reason: string;
+  actorId: string;
+  actorName: string;
+}): Promise<{ restoredCount: number; restoredDetails: string[] }> {
+  const { invoiceId, invoiceCode, reason, actorId, actorName } = params;
+
+  const saleTxs = await prisma.stockTransaction.findMany({
+    where: {
+      referenceId: invoiceId,
+      type: "SALE_DEDUCT",
+    },
+    include: {
+      product: { select: { id: true, name: true, retailUnit: true } },
+      batch: { select: { id: true, batchNumber: true } },
+    },
+  });
+
+  const restoredDetails: string[] = [];
+  let restoredCount = 0;
+
+  for (const tx of saleTxs) {
+    const qtyToRestore = Math.abs(tx.quantityChange);
+    if (qtyToRestore <= 0) continue;
+
+    if (tx.batchId) {
+      const batch = await prisma.inventoryBatch.findUnique({ where: { id: tx.batchId } });
+      if (batch) {
+        await prisma.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { remainingQuantity: { increment: qtyToRestore } },
+        });
+      }
+    }
+
+    await prisma.product.update({
+      where: { id: tx.productId },
+      data: { stockQuantity: { increment: qtyToRestore } },
+    });
+
+    await prisma.stockTransaction.create({
+      data: {
+        productId: tx.productId,
+        batchId: tx.batchId,
+        type: "RETURN",
+        quantityChange: qtyToRestore,
+        referenceId: invoiceId,
+        note: `Hoàn kho hủy hóa đơn ${invoiceCode}${
+          tx.batch ? ` (Lô ${tx.batch.batchNumber})` : " (Bù tồn âm)"
+        } — Lý do: ${reason}`,
+        createdById: actorId,
+        createdByName: actorName,
+      },
+    });
+
+    restoredCount += qtyToRestore;
+    restoredDetails.push(
+      `+${qtyToRestore} ${tx.product.retailUnit} ${tx.product.name}${
+        tx.batch ? ` (Lô ${tx.batch.batchNumber})` : ""
+      }`
+    );
+  }
+
+  return { restoredCount, restoredDetails };
+}

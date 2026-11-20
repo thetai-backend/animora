@@ -530,7 +530,9 @@ export function DoctorPortalClient() {
     }
   };
 
-  const medicinesAndShared = products.filter((p) => p.group === "MEDICINE" || p.group === "SHOP");
+  const medicinesAndShared = products.filter(
+    (p) => p.group === "MEDICINE" || p.group === "SHARED" || p.group === "SHOP"
+  );
   const supplies = products.filter((p) => p.group === "SUPPLY");
   const isLocked = Boolean(
     activeRecord &&
@@ -915,9 +917,19 @@ export function DoctorPortalClient() {
             {/* CỘT TRÁI (4 CỘT): Hồ sơ cố định + Lịch sử khám trước đó của thú cưng */}
             <div className="col-span-4 space-y-5">
               <div className="rounded-3xl border border-[#0F766E]/20 bg-white p-6 shadow-sm">
-                <span className="rounded-full bg-[#0F766E]/10 px-3 py-1 text-xs font-bold text-[#0F766E]">
-                  Hồ sơ Thú cưng cố định
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="rounded-full bg-[#0F766E]/10 px-3 py-1 text-xs font-bold text-[#0F766E]">
+                    Hồ sơ Thú cưng cố định
+                  </span>
+                  <a
+                    href={`/in/phieu-kham/${activeRecord.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-[#0F766E]/25 bg-[#FAF9F6] px-2.5 py-1 text-[11px] font-extrabold text-[#0F766E] hover:bg-[#0F766E]/10"
+                  >
+                    In Phiếu khám A4
+                  </a>
+                </div>
                 <h3 className="mt-3 text-xl font-extrabold text-[#132A2E]">
                   🐾 {activeRecord.pet ? activeRecord.pet.name : activeRecord.guestPetName}
                 </h3>

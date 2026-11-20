@@ -34,7 +34,7 @@ export default async function HomePage() {
         where: {
           isActive: true,
           isFeaturedOnWeb: true,
-          group: "SHOP",
+          group: { in: ["SHOP", "SHARED"] },
         },
         orderBy: { createdAt: "asc" },
       }),

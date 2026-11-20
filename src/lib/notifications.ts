@@ -69,3 +69,24 @@ export async function dispatchOtpNotification(
 ): Promise<OtpDispatchResult> {
   return providers[channel].sendOtp(recipient, code);
 }
+
+export async function dispatchReminderEmail(params: {
+  recipientEmail: string;
+  recipientName: string;
+  petName: string;
+  subject: string;
+  body: string;
+}): Promise<{ delivered: boolean; mode: "DEV_PREVIEW" | "PRODUCTION" }> {
+  console.log("==================================================");
+  console.log(`[ANIMORA EMAIL NHẮC HẸN TÁI KHÁM / TIÊM PHÒNG]`);
+  console.log(`Người nhận : ${params.recipientName} <${params.recipientEmail}>`);
+  console.log(`Thú cưng   : ${params.petName}`);
+  console.log(`Tiêu đề    : ${params.subject}`);
+  console.log(`Nội dung   : ${params.body}`);
+  console.log("==================================================");
+
+  return {
+    delivered: true,
+    mode: "DEV_PREVIEW",
+  };
+}

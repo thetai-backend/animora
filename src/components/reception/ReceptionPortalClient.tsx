@@ -8,22 +8,17 @@ import {
   AlertTriangle,
   UserPlus,
   CheckCircle2,
-  QrCode,
-  Banknote,
-  ShoppingBag,
-  Trash2,
   Plus,
-  Minus,
   RefreshCw,
   Clock,
   ShieldAlert,
   Save,
-  History,
   X,
   XCircle,
   Stethoscope,
   Sparkles,
   BellRing,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   formatBookingStatus,
@@ -33,7 +28,14 @@ import {
   formatVnd,
   formatWorkStatus,
 } from "@/lib/format";
-import { buildVietQrUrl, calculateInvoiceTotals } from "@/lib/pricing-utils";
+import {
+  ReceptionPosTab,
+  type PosInvoice,
+  type PosProduct,
+  type PosPromotion,
+} from "./ReceptionPosTab";
+import { ReceptionRemindersTab } from "./ReceptionRemindersTab";
+import { ReceptionShiftTab } from "./ReceptionShiftTab";
 
 interface DoctorInfo {
   id: string;
@@ -128,65 +130,6 @@ interface SlotItem {
   reason?: string;
 }
 
-interface PosProduct {
-  id: string;
-  sku: string;
-  name: string;
-  group: string;
-  price: number;
-  retailUnit: string;
-  stockQuantity: number;
-}
-
-interface PosPromotion {
-  id: string;
-  code: string | null;
-  title: string;
-  discountType: string;
-  discountValue: number;
-  applicableScope: string;
-}
-
-interface PosInvoice {
-  id: string;
-  invoiceCode: string;
-  type: string;
-  status: string;
-  subtotal: number;
-  eventDiscountAmount: number;
-  couponDiscountAmount: number;
-  totalAmount: number;
-  paymentMethod: string | null;
-  paidAt: string | null;
-  guestName: string | null;
-  guestPhone: string | null;
-  petSummary: string | null;
-  customer: { fullName: string; phone: string | null } | null;
-  doctor: { fullName: string } | null;
-  medicalRecord: { id: string; recordCode: string; status: string } | null;
-  items: {
-    id: string;
-    itemType: string;
-    productId: string | null;
-    name: string;
-    category: string;
-    unit: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    addedByRole: string;
-    product?: { id: string; stockQuantity: number; retailUnit: string } | null;
-  }[];
-  auditLogs: {
-    id: string;
-    actorName: string;
-    action: string;
-    itemName: string;
-    detail: string;
-    createdAt: string;
-  }[];
-}
-
 interface ScheduleRow {
   doctorId: string;
   dayOfWeek: number;
@@ -204,7 +147,7 @@ function getTodayStr(): string {
 }
 
 export function ReceptionPortalClient() {
-  const [tab, setTab] = useState<"DISPATCH" | "POS" | "SCHEDULE">("DISPATCH");
+  const [tab, setTab] = useState<"DISPATCH" | "POS" | "REMINDERS" | "SHIFT" | "SCHEDULE">("DISPATCH");
   const [date, setDate] = useState(getTodayStr());
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
 
@@ -270,16 +213,6 @@ export function ReceptionPortalClient() {
     bankAccountNumber: "08889992468",
     bankAccountName: "PHONG KHAM THU Y ANIMORA",
   });
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
-  const [shopProductToAdd, setShopProductToAdd] = useState<string>("");
-  const [selectedEventPromoId, setSelectedEventPromoId] = useState<string>("");
-  const [couponCode, setCouponCode] = useState<string>("");
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "VIETQR">("CASH");
-  const [cashReceived, setCashReceived] = useState<string>("");
-  const [retailModalOpen, setRetailModalOpen] = useState(false);
-  const [retailGuestName, setRetailGuestName] = useState("Khách mua lẻ tại quầy");
-  const [retailCart, setRetailCart] = useState<{ productId: string; quantity: number }[]>([]);
-  const [paying, setPaying] = useState(false);
 
   // Schedule state
   const [lunchBreakEnabled, setLunchBreakEnabled] = useState(false);
@@ -315,13 +248,6 @@ export function ReceptionPortalClient() {
     setPromotions(data.promotions || []);
     setProducts(data.products || []);
     if (data.bankInfo) setBankInfo(data.bankInfo);
-    if (data.pendingInvoices?.length && !selectedInvoiceId) {
-      setSelectedInvoiceId(data.pendingInvoices[0].id);
-    }
-    const shopProds = (data.products || []).filter((p: PosProduct) => p.group === "SHOP");
-    if (shopProds.length && !shopProductToAdd) {
-      setShopProductToAdd(shopProds[0].id);
-    }
   };
 
   const loadSchedules = async () => {
@@ -621,141 +547,6 @@ export function ReceptionPortalClient() {
     await loadDispatch();
   };
 
-  // --- POS ACTIONS ---
-  const activeInvoice = useMemo(
-    () => pendingInvoices.find((inv) => inv.id === selectedInvoiceId) || null,
-    [pendingInvoices, selectedInvoiceId]
-  );
-
-  const selectedEventPromo = useMemo(
-    () => promotions.find((p) => p.id === selectedEventPromoId) || null,
-    [promotions, selectedEventPromoId]
-  );
-
-  const matchedCouponPromo = useMemo(() => {
-    const clean = couponCode.trim().toUpperCase();
-    if (!clean) return null;
-    return promotions.find((p) => p.code?.toUpperCase() === clean) || null;
-  }, [promotions, couponCode]);
-
-  const posTotals = useMemo(() => {
-    if (!activeInvoice) {
-      return { subtotal: 0, eventDiscountAmount: 0, couponDiscountAmount: 0, totalAmount: 0 };
-    }
-    return calculateInvoiceTotals(
-      activeInvoice.items.map((i) => ({ category: i.category, totalPrice: i.totalPrice })),
-      selectedEventPromo,
-      matchedCouponPromo && matchedCouponPromo.id !== selectedEventPromo?.id
-        ? matchedCouponPromo
-        : null
-    );
-  }, [activeInvoice, selectedEventPromo, matchedCouponPromo]);
-
-  const zeroStockItemsInInvoice = useMemo(() => {
-    if (!activeInvoice) return [];
-    return activeInvoice.items.filter(
-      (i) => i.product && i.product.stockQuantity < i.quantity
-    );
-  }, [activeInvoice]);
-
-  const handleAddShopToInvoice = async () => {
-    if (!activeInvoice || !shopProductToAdd) return;
-    const res = await fetch(`/api/pos/invoices/${activeInvoice.id}/items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "ADD_SHOP_PRODUCT",
-        productId: shopProductToAdd,
-        quantity: 1,
-      }),
-    });
-    if (res.ok) {
-      notify("Đã gộp thêm sản phẩm Shop vào hóa đơn (đã ghi Audit Log).");
-      await loadPos();
-    }
-  };
-
-  const handleUpdateInvoiceItemQty = async (itemId: string, quantity: number) => {
-    if (!activeInvoice) return;
-    const res = await fetch(`/api/pos/invoices/${activeInvoice.id}/items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "UPDATE_QTY", itemId, quantity }),
-    });
-    if (res.ok) {
-      notify("Đã cập nhật số lượng và lưu vết vào Lịch sử chỉnh sửa (Audit Log).");
-      await loadPos();
-    }
-  };
-
-  const handleRemoveInvoiceItem = async (itemId: string) => {
-    if (!activeInvoice) return;
-    const res = await fetch(`/api/pos/invoices/${activeInvoice.id}/items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "REMOVE_ITEM", itemId }),
-    });
-    if (res.ok) {
-      notify("Đã bỏ mục khỏi hóa đơn và ghi nhận vào Audit Log.");
-      await loadPos();
-    }
-  };
-
-  const handlePayInvoice = async () => {
-    if (!activeInvoice) return;
-    setPaying(true);
-    try {
-      const cashVal =
-        paymentMethod === "CASH"
-          ? Number(cashReceived || posTotals.totalAmount)
-          : undefined;
-      const res = await fetch(`/api/pos/invoices/${activeInvoice.id}/pay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentMethod,
-          eventPromoId: selectedEventPromoId || null,
-          couponCode: couponCode.trim() || null,
-          cashReceived: cashVal,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        notify(data.error || "Thanh toán thất bại", "err");
-      } else {
-        notify(data.message);
-        setSelectedInvoiceId(null);
-        setSelectedEventPromoId("");
-        setCouponCode("");
-        setCashReceived("");
-        await loadPos();
-      }
-    } finally {
-      setPaying(false);
-    }
-  };
-
-  const handleCreateRetailInvoice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (retailCart.length === 0) {
-      notify("Vui lòng chọn ít nhất 1 sản phẩm Shop", "err");
-      return;
-    }
-    const res = await fetch("/api/pos/retail", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guestName: retailGuestName, items: retailCart }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setRetailModalOpen(false);
-      setRetailCart([]);
-      await loadPos();
-      setSelectedInvoiceId(data.invoice.id);
-      notify(`Đã tạo hóa đơn bán lẻ ${data.invoice.invoiceCode}!`);
-    }
-  };
-
   // --- SCHEDULE ACTIONS ---
   const toggleShift = (doctorId: string, dayOfWeek: number, field: "morningShift" | "afternoonShift") => {
     setSchedules((prev) => {
@@ -805,8 +596,6 @@ export function ReceptionPortalClient() {
     }
   };
 
-  const shopProducts = products.filter((p) => p.group === "SHOP");
-
   return (
     <div className="space-y-6">
       {toast && (
@@ -826,19 +615,19 @@ export function ReceptionPortalClient() {
         </div>
       )}
 
-      {/* Thanh chuyển tab nghiệp vụ Lễ tân */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="inline-flex rounded-2xl border border-[#0F766E]/15 bg-white p-1.5 shadow-xs">
+      {/* Thanh chuyển 5 tab nghiệp vụ Lễ tân */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1 rounded-2xl border border-[#0F766E]/15 bg-white p-1.5 shadow-xs">
           <button
             onClick={() => setTab("DISPATCH")}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-extrabold transition ${
               tab === "DISPATCH"
                 ? "bg-[#0F766E] text-white"
                 : "text-[#476268] hover:text-[#132A2E]"
             }`}
           >
             <CalendarClock className="h-4 w-4" />
-            Điều phối & Check-in ({bookings.length})
+            Điều phối &amp; Check-in ({bookings.length})
             {emergencyAlerts.length > 0 && (
               <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] text-white">
                 {emergencyAlerts.length} KHẨN
@@ -848,26 +637,50 @@ export function ReceptionPortalClient() {
 
           <button
             onClick={() => setTab("POS")}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-extrabold transition ${
               tab === "POS"
                 ? "bg-[#F97316] text-white"
                 : "text-[#476268] hover:text-[#132A2E]"
             }`}
           >
             <CreditCard className="h-4 w-4" />
-            Thu ngân POS & Bán lẻ ({pendingInvoices.length} chờ thu)
+            Thu ngân POS ({pendingInvoices.length} chờ thu)
+          </button>
+
+          <button
+            onClick={() => setTab("REMINDERS")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-extrabold transition ${
+              tab === "REMINDERS"
+                ? "bg-[#0D9488] text-white"
+                : "text-[#476268] hover:text-[#132A2E]"
+            }`}
+          >
+            <BellRing className="h-4 w-4" />
+            Nhắc hẹn tái khám ({followUpRecords.length})
+          </button>
+
+          <button
+            onClick={() => setTab("SHIFT")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-extrabold transition ${
+              tab === "SHIFT"
+                ? "bg-[#132A2E] text-white"
+                : "text-[#476268] hover:text-[#132A2E]"
+            }`}
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            Chốt ca cuối ngày
           </button>
 
           <button
             onClick={() => setTab("SCHEDULE")}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-extrabold transition ${
               tab === "SCHEDULE"
                 ? "bg-[#132A2E] text-white"
                 : "text-[#476268] hover:text-[#132A2E]"
             }`}
           >
             <Clock className="h-4 w-4" />
-            Lịch trực tuần & Nghỉ trưa
+            Lịch trực tuần &amp; Nghỉ trưa
           </button>
         </div>
 
@@ -1920,524 +1733,32 @@ export function ReceptionPortalClient() {
       )}
 
       {/* =====================================================================
-          TAB 2: THU NGÂN POS, BÁN LẺ SHOP, AUDIT LOG, MULTI-PROMO, VIETQR/CASH
+          TAB 2: THU NGÂN POS (2 CHẾ ĐỘ: PHIẾU BÁC SĨ & BÁN LẺ SHOP), IN A4
          ===================================================================== */}
       {tab === "POS" && (
-        <div className="grid grid-cols-12 gap-6">
-          {/* Cột trái 4 cột: Danh sách phiếu chờ thanh toán + Nút Bán lẻ Shop */}
-          <div className="col-span-4 space-y-4">
-            <button
-              onClick={() => setRetailModalOpen(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0F766E] py-3.5 text-sm font-extrabold text-white shadow-sm hover:bg-[#0B5D56]"
-            >
-              <ShoppingBag className="h-4 w-4" />
-              + Tạo phiếu Bán lẻ Shop nhanh
-            </button>
-
-            <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-extrabold uppercase tracking-wide text-[#476268]">
-                Phiếu chờ thanh toán ({pendingInvoices.length})
-              </h3>
-              <div className="mt-3 space-y-2.5">
-                {pendingInvoices.length === 0 && (
-                  <p className="text-xs text-[#476268]">
-                    Hiện không có phiếu nào chờ thu tiền.
-                  </p>
-                )}
-                {pendingInvoices.map((inv) => (
-                  <button
-                    key={inv.id}
-                    onClick={() => {
-                      setSelectedInvoiceId(inv.id);
-                      setCashReceived("");
-                    }}
-                    className={`w-full rounded-2xl border p-4 text-left transition ${
-                      selectedInvoiceId === inv.id
-                        ? "border-[#F97316] bg-[#F97316]/8 shadow-xs"
-                        : "border-[#132A2E]/10 bg-[#FAF9F6] hover:border-[#0F766E]/40"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-sm font-extrabold text-[#0F766E]">
-                        {inv.invoiceCode}
-                      </span>
-                      <span className="text-sm font-extrabold text-[#F97316]">
-                        {formatVnd(inv.subtotal)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs font-bold text-[#132A2E]">
-                      {inv.customer ? inv.customer.fullName : inv.guestName}
-                    </p>
-                    <p className="text-[11px] text-[#476268]">
-                      {inv.petSummary || "Mua lẻ Shop"} •{" "}
-                      {inv.doctor ? `BS: ${inv.doctor.fullName}` : "Bán lẻ tại quầy"}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Danh sách hóa đơn đã thu gần đây */}
-            <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-extrabold uppercase tracking-wide text-[#476268]">
-                Đã thu gần đây ({paidInvoices.length})
-              </h3>
-              <div className="mt-3 space-y-2">
-                {paidInvoices.slice(0, 6).map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex items-center justify-between rounded-xl bg-[#FAF9F6] px-3 py-2 text-xs"
-                  >
-                    <div>
-                      <span className="font-mono font-bold text-[#0F766E]">
-                        {inv.invoiceCode}
-                      </span>{" "}
-                      • {inv.paymentMethod === "VIETQR" ? "VietQR" : "Tiền mặt"}
-                    </div>
-                    <span className="font-extrabold text-[#132A2E]">
-                      {formatVnd(inv.totalAmount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Cột phải 8 cột: Chi tiết thu ngân POS */}
-          <div className="col-span-8">
-            {retailModalOpen && (
-              <form
-                onSubmit={handleCreateRetailInvoice}
-                className="mb-6 rounded-3xl border-2 border-[#0F766E]/40 bg-white p-6 shadow-md"
-              >
-                <h3 className="text-lg font-extrabold text-[#0F766E]">
-                  Bán lẻ Shop nhanh (Không khám bệnh)
-                </h3>
-                <div className="mt-3">
-                  <label className="mb-1 block text-xs font-bold">Tên khách mua lẻ</label>
-                  <input
-                    value={retailGuestName}
-                    onChange={(e) => setRetailGuestName(e.target.value)}
-                    className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm"
-                  />
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2.5">
-                  {shopProducts.map((p) => {
-                    const inCart = retailCart.find((c) => c.productId === p.id);
-                    return (
-                      <div
-                        key={p.id}
-                        className="flex items-center justify-between rounded-xl border border-[#132A2E]/10 bg-[#FAF9F6] p-3 text-xs"
-                      >
-                        <div className="min-w-0 pr-2">
-                          <p className="truncate font-bold">{p.name}</p>
-                          <p className="text-[#476268]">
-                            {formatVnd(p.price)} •{" "}
-                            <span
-                              className={
-                                p.stockQuantity <= 0
-                                  ? "font-bold text-rose-600"
-                                  : "text-emerald-700"
-                              }
-                            >
-                              Tồn: {p.stockQuantity} {p.retailUnit}
-                            </span>
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRetailCart((prev) =>
-                              inCart
-                                ? prev.map((c) =>
-                                    c.productId === p.id
-                                      ? { ...c, quantity: c.quantity + 1 }
-                                      : c
-                                  )
-                                : [...prev, { productId: p.id, quantity: 1 }]
-                            )
-                          }
-                          className="shrink-0 rounded-lg bg-[#0F766E] px-2.5 py-1.5 font-bold text-white"
-                        >
-                          {inCart ? `+1 (${inCart.quantity})` : "Thêm"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRetailModalOpen(false)}
-                    className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold"
-                  >
-                    Đóng
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-xl bg-[#F97316] px-5 py-2 text-xs font-bold text-white"
-                  >
-                    Tạo phiếu thu ngân ({retailCart.reduce((s, c) => s + c.quantity, 0)} món)
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {!activeInvoice ? (
-              <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-12 text-center text-sm text-[#476268]">
-                Chọn một phiếu chờ thanh toán bên trái hoặc tạo phiếu Bán lẻ Shop mới.
-              </div>
-            ) : (
-              <div className="rounded-3xl border border-[#0F766E]/20 bg-white p-7 shadow-md space-y-6">
-                {/* Header hóa đơn */}
-                <div className="flex items-start justify-between border-b border-[#132A2E]/10 pb-4">
-                  <div>
-                    <span className="font-mono text-2xl font-extrabold text-[#0F766E]">
-                      {activeInvoice.invoiceCode}
-                    </span>
-                    <p className="mt-1 text-sm text-[#476268]">
-                      Khách:{" "}
-                      <strong className="text-[#132A2E]">
-                        {activeInvoice.customer
-                          ? activeInvoice.customer.fullName
-                          : activeInvoice.guestName}
-                      </strong>{" "}
-                      • {activeInvoice.petSummary}
-                    </p>
-                  </div>
-                  {activeInvoice.medicalRecord && (
-                    <span className="rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 border border-amber-200">
-                      Bệnh án {activeInvoice.medicalRecord.recordCode} sẽ KHÓA CỨNG khi thu tiền
-                    </span>
-                  )}
-                </div>
-
-                {/* CẢNH BÁO ĐỎ TỒN KHO = 0 (VẪN CHO PHÉP THANH TOÁN - TỒN ÂM TẠM THỜI) */}
-                {zeroStockItemsInInvoice.length > 0 && (
-                  <div className="flex items-start gap-3 rounded-2xl border-2 border-rose-500 bg-rose-50 p-4 text-xs font-bold text-rose-800">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
-                    <div>
-                      <p className="text-sm font-extrabold">
-                        CẢNH BÁO TỒN KHO BẰNG 0 / KHÔNG ĐỦ TRÊN HỆ THỐNG!
-                      </p>
-                      <p className="mt-0.5 font-normal">
-                        Mặt hàng:{" "}
-                        {zeroStockItemsInInvoice
-                          .map(
-                            (i) =>
-                              `${i.name} (tồn hiện tại: ${i.product?.stockQuantity ?? 0}, cần: ${i.quantity})`
-                          )
-                          .join("; ")}
-                        . Hệ thống VẪN CHO PHÉP thanh toán (chấp nhận tồn kho âm tạm thời) để không làm gián đoạn khách.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Gộp thêm hàng Shop vào hóa đơn khám */}
-                <div className="flex items-center gap-2 rounded-2xl bg-[#FAF9F6] p-3.5">
-                  <select
-                    value={shopProductToAdd}
-                    onChange={(e) => setShopProductToAdd(e.target.value)}
-                    className="flex-1 rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs font-semibold"
-                  >
-                    {shopProducts.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        [SHOP] {p.name} — {formatVnd(p.price)} (Tồn: {p.stockQuantity}{" "}
-                        {p.retailUnit})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddShopToInvoice}
-                    className="inline-flex items-center gap-1 rounded-xl bg-[#0F766E] px-4 py-2 text-xs font-bold text-white hover:bg-[#0B5D56]"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Gộp hàng Shop
-                  </button>
-                </div>
-
-                {/* Bảng chi tiết món (Cho phép sửa/bỏ thuốc -> ghi Audit Log) */}
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#132A2E]/10 uppercase text-[#476268]">
-                      <th className="py-2">Hạng mục</th>
-                      <th className="py-2">Đơn giá</th>
-                      <th className="py-2">Số lượng</th>
-                      <th className="py-2 text-right">Thành tiền</th>
-                      <th className="py-2 text-right">Sửa</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#132A2E]/8">
-                    {activeInvoice.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="py-2.5 pr-2">
-                          <p className="font-bold text-[#132A2E]">{item.name}</p>
-                          <p className="text-[11px] text-[#476268]">
-                            {item.itemType === "SERVICE"
-                              ? "Dịch vụ"
-                              : item.itemType === "MEDICINE"
-                              ? "Thuốc kê đơn"
-                              : "Sản phẩm Shop"}
-                            {item.product && (
-                              <span
-                                className={
-                                  item.product.stockQuantity <= 0
-                                    ? " ml-2 font-bold text-rose-600"
-                                    : " ml-2 text-emerald-700"
-                                }
-                              >
-                                (Tồn kho: {item.product.stockQuantity} {item.unit})
-                              </span>
-                            )}
-                          </p>
-                        </td>
-                        <td className="py-2.5">{formatVnd(item.unitPrice)}</td>
-                        <td className="py-2.5">
-                          {item.itemType !== "SERVICE" ? (
-                            <div className="inline-flex items-center gap-1.5">
-                              <button
-                                onClick={() =>
-                                  handleUpdateInvoiceItemQty(item.id, item.quantity - 1)
-                                }
-                                className="rounded border border-slate-300 p-1 hover:bg-slate-100"
-                              >
-                                <Minus className="h-3 w-3" />
-                              </button>
-                              <span className="w-6 text-center font-bold">
-                                {item.quantity}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  handleUpdateInvoiceItemQty(item.id, item.quantity + 1)
-                                }
-                                className="rounded border border-slate-300 p-1 hover:bg-slate-100"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="font-bold">{item.quantity}</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-right font-bold">
-                          {formatVnd(item.totalPrice)}
-                        </td>
-                        <td className="py-2.5 text-right">
-                          {item.itemType !== "SERVICE" && (
-                            <button
-                              onClick={() => handleRemoveInvoiceItem(item.id)}
-                              title="Bỏ thuốc/sản phẩm (lưu Audit Log)"
-                              className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {/* LỊCH SỬ CHỈNH SỬA (AUDIT LOG) */}
-                {activeInvoice.auditLogs.length > 0 && (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                    <p className="flex items-center gap-1.5 text-xs font-extrabold text-amber-900">
-                      <History className="h-4 w-4" />
-                      Lịch sử chỉnh sửa tại quầy (Audit Log):
-                    </p>
-                    <ul className="mt-2 space-y-1 text-xs text-amber-950">
-                      {activeInvoice.auditLogs.map((log) => (
-                        <li key={log.id}>
-                          • <strong>{log.actorName}</strong> ({formatDateVn(log.createdAt)}):{" "}
-                          <strong>{log.action}</strong> — {log.detail}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* ÁP DỤNG ĐA KHUYẾN MÃI (SỰ KIỆN TRƯỚC -> MÃ GIẢM GIÁ SAU) */}
-                <div className="grid grid-cols-2 gap-4 rounded-2xl bg-[#FAF9F6] p-4">
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-[#132A2E]">
-                      1. Ưu đãi Sự kiện / Dịch vụ (trừ trước)
-                    </label>
-                    <select
-                      value={selectedEventPromoId}
-                      onChange={(e) => setSelectedEventPromoId(e.target.value)}
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs font-semibold"
-                    >
-                      <option value="">Không áp dụng sự kiện</option>
-                      {promotions.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title} (
-                          {p.discountType === "PERCENT"
-                            ? `-${p.discountValue}%`
-                            : `-${formatVnd(p.discountValue)}`}
-                          )
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-[#132A2E]">
-                      2. Mã giảm giá cộng dồn (trừ sau, VD: MEMBER10)
-                    </label>
-                    <input
-                      value={couponCode}
-                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                      placeholder="Nhập mã VD: MEMBER10"
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 font-mono text-xs font-bold uppercase"
-                    />
-                  </div>
-                </div>
-
-                {/* BẢNG TỔNG KẾT TIỀN */}
-                <div className="space-y-1.5 rounded-2xl border border-[#0F766E]/15 bg-white p-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-[#476268]">Tạm tính</span>
-                    <span className="font-bold">{formatVnd(posTotals.subtotal)}</span>
-                  </div>
-                  {posTotals.eventDiscountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Giảm ưu đãi sự kiện (bước 1)</span>
-                      <span className="font-bold">
-                        -{formatVnd(posTotals.eventDiscountAmount)}
-                      </span>
-                    </div>
-                  )}
-                  {posTotals.couponDiscountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Giảm mã ưu đãi cộng dồn (bước 2)</span>
-                      <span className="font-bold">
-                        -{formatVnd(posTotals.couponDiscountAmount)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t border-[#132A2E]/10 pt-2 text-lg font-extrabold text-[#0F766E]">
-                    <span>Tổng khách phải thanh toán</span>
-                    <span>{formatVnd(posTotals.totalAmount)}</span>
-                  </div>
-                </div>
-
-                {/* CHỌN 1 TRONG 2 PHƯƠNG THỨC: TIỀN MẶT HOẶC VIETQR */}
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("CASH")}
-                      className={`flex items-center justify-center gap-2 rounded-2xl border-2 py-3 text-sm font-extrabold transition ${
-                        paymentMethod === "CASH"
-                          ? "border-[#0F766E] bg-[#0F766E]/8 text-[#0F766E]"
-                          : "border-slate-200 text-[#476268]"
-                      }`}
-                    >
-                      <Banknote className="h-5 w-5" />
-                      Tiền mặt
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("VIETQR")}
-                      className={`flex items-center justify-center gap-2 rounded-2xl border-2 py-3 text-sm font-extrabold transition ${
-                        paymentMethod === "VIETQR"
-                          ? "border-[#0F766E] bg-[#0F766E]/8 text-[#0F766E]"
-                          : "border-slate-200 text-[#476268]"
-                      }`}
-                    >
-                      <QrCode className="h-5 w-5" />
-                      Chuyển khoản VietQR tĩnh
-                    </button>
-                  </div>
-
-                  {paymentMethod === "CASH" ? (
-                    <div className="grid grid-cols-2 gap-4 rounded-2xl bg-[#FAF9F6] p-4">
-                      <div>
-                        <label className="mb-1 block text-xs font-bold">
-                          Tiền khách đưa (VNĐ)
-                        </label>
-                        <input
-                          type="number"
-                          value={cashReceived}
-                          onChange={(e) => setCashReceived(e.target.value)}
-                          placeholder={String(posTotals.totalAmount)}
-                          className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3.5 py-2.5 text-sm font-bold"
-                        />
-                      </div>
-                      <div className="flex flex-col justify-center rounded-xl bg-white px-4 py-2 border border-[#132A2E]/10">
-                        <span className="text-xs text-[#476268]">Tiền thối lại khách</span>
-                        <span className="text-xl font-extrabold text-[#F97316]">
-                          {formatVnd(
-                            Math.max(
-                              0,
-                              Number(cashReceived || posTotals.totalAmount) -
-                                posTotals.totalAmount
-                            )
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-6 rounded-2xl border border-[#0F766E]/20 bg-[#FAF9F6] p-5">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={buildVietQrUrl({
-                          bankCode: bankInfo.bankCode,
-                          accountNumber: bankInfo.bankAccountNumber,
-                          accountName: bankInfo.bankAccountName,
-                          amount: posTotals.totalAmount,
-                          invoiceCode: activeInvoice.invoiceCode,
-                        })}
-                        alt="Mã VietQR thanh toán ANIMORA"
-                        className="h-44 w-44 rounded-xl border border-white bg-white object-contain p-1 shadow-sm"
-                      />
-                      <div className="space-y-1.5 text-xs">
-                        <p className="text-sm font-extrabold text-[#0F766E]">
-                          Quét mã VietQR — Đã điền sẵn số tiền & nội dung
-                        </p>
-                        <p>
-                          Ngân hàng: <strong>{bankInfo.bankCode}</strong> • STK:{" "}
-                          <strong className="font-mono">{bankInfo.bankAccountNumber}</strong>
-                        </p>
-                        <p>
-                          Chủ tài khoản: <strong>{bankInfo.bankAccountName}</strong>
-                        </p>
-                        <p>
-                          Số tiền:{" "}
-                          <strong className="text-base text-[#F97316]">
-                            {formatVnd(posTotals.totalAmount)}
-                          </strong>
-                        </p>
-                        <p>
-                          Nội dung CK:{" "}
-                          <strong className="font-mono">
-                            ANIMORA {activeInvoice.invoiceCode}
-                          </strong>
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handlePayInvoice}
-                    disabled={paying}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#F97316] py-4 text-base font-extrabold text-white shadow-lg shadow-[#F97316]/25 transition hover:bg-[#EA580C] disabled:opacity-60"
-                  >
-                    <CheckCircle2 className="h-5 w-5" />
-                    {paying
-                      ? "Đang xác nhận thu tiền & trừ kho FEFO..."
-                      : "Xác nhận đã thu (Trừ kho FEFO & Khóa bệnh án S.O.A.P)"}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <ReceptionPosTab
+          pendingInvoices={pendingInvoices}
+          paidInvoices={paidInvoices}
+          promotions={promotions}
+          products={products}
+          bankInfo={bankInfo}
+          onReloadPos={loadPos}
+          notify={notify}
+        />
       )}
 
       {/* =====================================================================
-          TAB 3: LỊCH TRỰC CỐ ĐỊNH HÀNG TUẦN & CÔNG TẮC NGHỈ TRƯA
+          TAB 3: NHẮC HẸN TÁI KHÁM / TIÊM PHÒNG & NHẬT KÝ EMAIL
+         ===================================================================== */}
+      {tab === "REMINDERS" && <ReceptionRemindersTab notify={notify} />}
+
+      {/* =====================================================================
+          TAB 4: ĐỐI SOÁT CHỐT CA CUỐI NGÀY (TIỀN MẶT VS VIETQR)
+         ===================================================================== */}
+      {tab === "SHIFT" && <ReceptionShiftTab />}
+
+      {/* =====================================================================
+          TAB 5: LỊCH TRỰC CỐ ĐỊNH HÀNG TUẦN & CÔNG TẮC NGHỈ TRƯA
          ===================================================================== */}
       {tab === "SCHEDULE" && (
         <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-8 shadow-sm space-y-6">

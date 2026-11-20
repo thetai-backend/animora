@@ -98,7 +98,7 @@ export async function setSessionCookie(payload: SessionPayload): Promise<void> {
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: Boolean(process.env.APP_URL?.startsWith("https://")),
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 ngày
   });

@@ -32,9 +32,17 @@ export async function POST(
   if (invoice.status !== "PENDING") {
     return NextResponse.json({ error: "Hóa đơn này đã được xử lý trước đó" }, { status: 400 });
   }
+  if (invoice.items.length === 0) {
+    return NextResponse.json({ error: "Hóa đơn đang trống, không thể thu tiền" }, { status: 400 });
+  }
 
   const body = await request.json();
-  const paymentMethod = body.paymentMethod === "VIETQR" ? "VIETQR" : body.paymentMethod === "CASH" ? "CASH" : null;
+  const paymentMethod =
+    body.paymentMethod === "VIETQR"
+      ? "VIETQR"
+      : body.paymentMethod === "CASH"
+      ? "CASH"
+      : null;
   if (!paymentMethod) {
     return NextResponse.json(
       { error: "Vui lòng chọn 1 phương thức thanh toán: Tiền mặt hoặc Chuyển khoản VietQR" },
@@ -44,6 +52,7 @@ export async function POST(
 
   const eventPromoId = body.eventPromoId ? String(body.eventPromoId) : null;
   const couponCode = body.couponCode ? String(body.couponCode).trim().toUpperCase() : null;
+  const now = new Date();
 
   const [eventPromo, couponPromo] = await Promise.all([
     eventPromoId
@@ -54,8 +63,26 @@ export async function POST(
       : Promise.resolve(null),
   ]);
 
-  if (couponCode && !couponPromo) {
-    return NextResponse.json({ error: `Mã giảm giá "${couponCode}" không hợp lệ` }, { status: 400 });
+  if (
+    eventPromo &&
+    (!eventPromo.isActive || eventPromo.startDate > now || eventPromo.endDate < now)
+  ) {
+    return NextResponse.json(
+      { error: `Chương trình "${eventPromo.title}" đã hết hạn hoặc đang tạm tắt` },
+      { status: 400 }
+    );
+  }
+
+  if (couponCode) {
+    if (!couponPromo) {
+      return NextResponse.json({ error: `Mã giảm giá "${couponCode}" không hợp lệ` }, { status: 400 });
+    }
+    if (!couponPromo.isActive || couponPromo.startDate > now || couponPromo.endDate < now) {
+      return NextResponse.json(
+        { error: `Mã giảm giá "${couponCode}" đã hết hạn hoặc không còn hiệu lực` },
+        { status: 400 }
+      );
+    }
   }
 
   const totals = calculateInvoiceTotals(
@@ -117,7 +144,11 @@ export async function POST(
       status: "PAID",
       paidAt,
     },
-    include: { items: true, auditLogs: true },
+    include: {
+      items: true,
+      auditLogs: true,
+      medicalRecord: { select: { id: true, recordCode: true, status: true } },
+    },
   });
 
   // Rule 6: Ngay khi hóa đơn được xác nhận thanh toán -> KHÓA CỨNG bệnh án S.O.A.P gốc!

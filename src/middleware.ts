@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES: { prefix: string; allowedRoles: UserRole[] }[] = [
   { prefix: "/le-tan", allowedRoles: ["RECEPTIONIST", "MANAGER"] },
   { prefix: "/bac-si", allowedRoles: ["DOCTOR", "MANAGER"] },
   { prefix: "/tai-khoan", allowedRoles: ["CUSTOMER", "MANAGER", "RECEPTIONIST", "DOCTOR"] },
+  { prefix: "/in", allowedRoles: ["CUSTOMER", "MANAGER", "RECEPTIONIST", "DOCTOR"] },
 ];
 
 export async function middleware(request: NextRequest) {
@@ -48,5 +49,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/quan-ly/:path*", "/le-tan/:path*", "/bac-si/:path*", "/tai-khoan/:path*"],
+  matcher: ["/quan-ly/:path*", "/le-tan/:path*", "/bac-si/:path*", "/tai-khoan/:path*", "/in/:path*"],
 };

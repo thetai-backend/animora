@@ -8,30 +8,88 @@ export async function GET() {
     return NextResponse.json({ error: "Chỉ Quản lý mới có quyền truy cập" }, { status: 403 });
   }
 
-  const [medicalRecords, invoices] = await Promise.all([
+  const [medicalRecords, invoices, auditLogs, customers, pets] = await Promise.all([
     prisma.medicalRecord.findMany({
       include: {
-        doctor: { select: { fullName: true } },
-        customer: { select: { fullName: true, phone: true } },
-        pet: { select: { name: true, species: true, breed: true } },
+        doctor: { select: { id: true, fullName: true, title: true } },
+        customer: { select: { id: true, fullName: true, phone: true, email: true } },
+        pet: { select: { id: true, name: true, species: true, breed: true, status: true } },
         addendums: { orderBy: { createdAt: "asc" } },
-        invoice: { select: { invoiceCode: true, status: true, totalAmount: true } },
+        invoice: {
+          select: {
+            id: true,
+            invoiceCode: true,
+            status: true,
+            totalAmount: true,
+            paymentMethod: true,
+            items: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: 150,
     }),
     prisma.invoice.findMany({
       include: {
-        customer: { select: { fullName: true, phone: true } },
-        doctor: { select: { fullName: true } },
-        cashier: { select: { fullName: true } },
+        customer: { select: { id: true, fullName: true, phone: true } },
+        doctor: { select: { id: true, fullName: true } },
+        cashier: { select: { id: true, fullName: true } },
+        medicalRecord: { select: { id: true, recordCode: true, status: true } },
         items: true,
         auditLogs: { orderBy: { createdAt: "desc" } },
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: 150,
+    }),
+    prisma.invoiceAuditLog.findMany({
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceCode: true,
+            status: true,
+            guestName: true,
+            customer: { select: { fullName: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 150,
+    }),
+    prisma.user.findMany({
+      where: { role: "CUSTOMER" },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        address: true,
+        isActive: true,
+        createdAt: true,
+        _count: {
+          select: {
+            pets: true,
+            customerBookings: true,
+            customerInvoices: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.pet.findMany({
+      include: {
+        owner: { select: { id: true, fullName: true, phone: true, email: true } },
+        _count: { select: { medicalRecords: true, bookingPets: true } },
+      },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
-  return NextResponse.json({ medicalRecords, invoices });
+  return NextResponse.json({
+    medicalRecords,
+    invoices,
+    auditLogs,
+    customers,
+    pets,
+  });
 }

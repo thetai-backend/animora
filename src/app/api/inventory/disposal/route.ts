@@ -42,28 +42,54 @@ export async function POST(request: NextRequest) {
   const quantityChange = type === "DISPOSAL" ? -Math.abs(rawQuantity) : rawQuantity;
   const slipCode = generateShortCode(type === "DISPOSAL" ? "XH" : "KK");
 
+  let targetBatchId = batchId;
+  let targetBatchNumber: string | null = null;
+
+  if (targetBatchId) {
+    const batch = await prisma.inventoryBatch.findUnique({ where: { id: targetBatchId } });
+    if (batch) {
+      targetBatchNumber = batch.batchNumber;
+      await prisma.inventoryBatch.update({
+        where: { id: targetBatchId },
+        data: { remainingQuantity: Math.max(0, batch.remainingQuantity + quantityChange) },
+      });
+    } else {
+      targetBatchId = null;
+    }
+  } else if (quantityChange < 0) {
+    // Nếu không chọn lô cụ thể khi xuất hủy -> trừ theo lô gần hết hạn nhất (FEFO)
+    let left = Math.abs(quantityChange);
+    const batches = await prisma.inventoryBatch.findMany({
+      where: { productId: product.id, remainingQuantity: { gt: 0 } },
+      orderBy: { expiryDate: "asc" },
+    });
+    for (const b of batches) {
+      if (left <= 0) break;
+      const take = Math.min(b.remainingQuantity, left);
+      await prisma.inventoryBatch.update({
+        where: { id: b.id },
+        data: { remainingQuantity: { decrement: take } },
+      });
+      if (!targetBatchId) {
+        targetBatchId = b.id;
+        targetBatchNumber = b.batchNumber;
+      }
+      left -= take;
+    }
+  }
+
   const slip = await prisma.disposalSlip.create({
     data: {
       slipCode,
       type,
       productId: product.id,
-      batchId,
+      batchId: targetBatchId,
       quantityChange,
       reason,
       createdById: session.userId,
       createdByName: session.fullName,
     },
   });
-
-  if (batchId) {
-    const batch = await prisma.inventoryBatch.findUnique({ where: { id: batchId } });
-    if (batch) {
-      await prisma.inventoryBatch.update({
-        where: { id: batchId },
-        data: { remainingQuantity: Math.max(0, batch.remainingQuantity + quantityChange) },
-      });
-    }
-  }
 
   await prisma.product.update({
     where: { id: product.id },
@@ -73,11 +99,13 @@ export async function POST(request: NextRequest) {
   await prisma.stockTransaction.create({
     data: {
       productId: product.id,
-      batchId,
+      batchId: targetBatchId,
       type,
       quantityChange,
       referenceId: slip.id,
-      note: `${type === "DISPOSAL" ? "Xuất hủy" : "Điều chỉnh kiểm kê"} ${slipCode}: ${reason}`,
+      note: `${type === "DISPOSAL" ? "Xuất hủy" : "Điều chỉnh kiểm kê"} ${slipCode}${
+        targetBatchNumber ? ` (Lô ${targetBatchNumber})` : ""
+      }: ${reason}`,
       createdById: session.userId,
       createdByName: session.fullName,
     },
@@ -86,7 +114,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(
     {
       slip,
-      message: `Đã lập phiếu ${slipCode} (${quantityChange > 0 ? `+${quantityChange}` : quantityChange} ${product.retailUnit}).`,
+      message: `Đã lập phiếu ${slipCode} (${quantityChange > 0 ? `+${quantityChange}` : quantityChange} ${product.retailUnit}${
+        targetBatchNumber ? `, Lô ${targetBatchNumber}` : ""
+      }).`,
     },
     { status: 201 }
   );

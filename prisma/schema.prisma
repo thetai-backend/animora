@@ -126,7 +126,7 @@ model Product {
   sku                 String              @unique
   name                String
   brand               String
-  // SHOP | MEDICINE | SUPPLY (Rule 10)
+  // SHOP | MEDICINE | SHARED | SUPPLY (Rule 10)
   group               String              @default("SHOP")
   category            String
   // DOG | CAT | BOTH
@@ -347,21 +347,41 @@ model MedicalRecord {
   respiratoryRate String?
   assessment      String                  @default("")
   plan            String                  @default("")
-  followUpDate    DateTime?
-  followUpNote    String?
+  followUpDate     DateTime?
+  followUpNote     String?
+  reminderCalledAt DateTime?
+  reminderCalledBy String?
 
   // IN_PROGRESS | SENT_TO_POS | LOCKED
-  status          String                  @default("IN_PROGRESS")
-  lockedAt        DateTime?
+  status           String                  @default("IN_PROGRESS")
+  lockedAt         DateTime?
 
-  addendums       MedicalRecordAddendum[]
-  invoice         Invoice?
+  addendums        MedicalRecordAddendum[]
+  emailLogs        EmailLog[]
+  invoice          Invoice?
 
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   @@index([doctorId, createdAt])
   @@index([petId])
+}
+
+model EmailLog {
+  id              String         @id @default(cuid())
+  medicalRecordId String?
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id], onDelete: SetNull)
+  recipientEmail  String
+  recipientName   String
+  petName         String?
+  subject         String
+  body            String
+  channel         String         @default("EMAIL")
+  sentById        String?
+  sentByName      String?
+  createdAt       DateTime       @default(now())
+
+  @@index([createdAt])
 }
 
 model MedicalRecordAddendum {

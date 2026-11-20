@@ -42,7 +42,7 @@ export default async function ProductDetailPage({
     where: {
       isActive: true,
       isFeaturedOnWeb: true,
-      group: "SHOP",
+      group: { in: ["SHOP", "SHARED"] },
       id: { not: product.id },
     },
     take: 4,

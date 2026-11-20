@@ -32,6 +32,30 @@ export function formatDateVn(date: Date | string | null | undefined): string {
   }).format(d);
 }
 
+export function formatDateTimeVn(date: Date | string | null | undefined): string {
+  if (!date) return "Chưa cập nhật";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "Chưa cập nhật";
+  return new Intl.DateTimeFormat("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
+}
+
+export function slugifyVi(input: string): string {
+  return input
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
 export function calculatePetAge(birthDate: Date | string | null | undefined): string {
   if (!birthDate) return "";
   const d = typeof birthDate === "string" ? new Date(birthDate) : birthDate;

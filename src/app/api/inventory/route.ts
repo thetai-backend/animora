@@ -11,10 +11,8 @@ export async function GET() {
 
   const [products, batches, transactions, internalSlips, disposalSlips] = await Promise.all([
     prisma.product.findMany({
-      where: { isActive: true },
       include: {
         batches: {
-          where: { remainingQuantity: { gt: 0 } },
           orderBy: { expiryDate: "asc" },
         },
       },
@@ -35,14 +33,14 @@ export async function GET() {
         batch: { select: { batchNumber: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 40,
+      take: 60,
     }),
     prisma.internalUsageSlip.findMany({
       include: {
         product: { select: { sku: true, name: true, retailUnit: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 25,
+      take: 40,
     }),
     prisma.disposalSlip.findMany({
       include: {
@@ -50,7 +48,7 @@ export async function GET() {
         batch: { select: { batchNumber: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 25,
+      take: 40,
     }),
   ]);
 
@@ -61,11 +59,13 @@ export async function GET() {
   }));
 
   const expiringBatches = enrichedBatches.filter((b) => b.expiringSoon);
+  const negativeStockProducts = products.filter((p) => p.isActive && p.stockQuantity < 0);
 
   return NextResponse.json({
     products,
     batches: enrichedBatches,
     expiringBatches,
+    negativeStockProducts,
     transactions,
     internalSlips,
     disposalSlips,

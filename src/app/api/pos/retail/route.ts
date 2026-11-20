@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShortCode } from "@/lib/booking-utils";
+import { calculateInvoiceTotals } from "@/lib/pricing-utils";
+import { deductStockFEFO } from "@/lib/inventory-utils";
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -15,6 +17,7 @@ export async function POST(request: NextRequest) {
   const itemsInput: { productId: string; quantity: number }[] = Array.isArray(body.items)
     ? body.items
     : [];
+  const payNow = Boolean(body.payNow);
 
   if (itemsInput.length === 0) {
     return NextResponse.json(
@@ -56,27 +59,152 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Không có sản phẩm hợp lệ" }, { status: 400 });
   }
 
+  const invoiceCode = String(body.invoiceCode || "").trim() || generateShortCode("BL");
   const subtotal = createdItems.reduce((s, i) => s + i.totalPrice, 0);
 
+  if (!payNow) {
+    const invoice = await prisma.invoice.create({
+      data: {
+        invoiceCode,
+        type: "RETAIL",
+        guestName,
+        guestPhone,
+        petSummary: "Mua lẻ sản phẩm tại Shop",
+        subtotal,
+        totalAmount: subtotal,
+        status: "PENDING",
+        items: { create: createdItems },
+      },
+      include: {
+        items: {
+          include: { product: { select: { id: true, stockQuantity: true, retailUnit: true } } },
+        },
+        auditLogs: true,
+      },
+    });
+    return NextResponse.json({ invoice }, { status: 201 });
+  }
+
+  // Thanh toán trực tiếp ngay trên tab Bán lẻ Shop nhanh
+  const paymentMethod =
+    body.paymentMethod === "VIETQR"
+      ? "VIETQR"
+      : body.paymentMethod === "CASH"
+      ? "CASH"
+      : null;
+
+  if (!paymentMethod) {
+    return NextResponse.json(
+      { error: "Vui lòng chọn 1 phương thức thanh toán: Tiền mặt hoặc VietQR" },
+      { status: 400 }
+    );
+  }
+
+  const eventPromoId = body.eventPromoId ? String(body.eventPromoId) : null;
+  const couponCode = body.couponCode ? String(body.couponCode).trim().toUpperCase() : null;
+  const now = new Date();
+
+  const [eventPromo, couponPromo] = await Promise.all([
+    eventPromoId
+      ? prisma.promotion.findUnique({ where: { id: eventPromoId } })
+      : Promise.resolve(null),
+    couponCode
+      ? prisma.promotion.findUnique({ where: { code: couponCode } })
+      : Promise.resolve(null),
+  ]);
+
+  if (
+    eventPromo &&
+    (!eventPromo.isActive || eventPromo.startDate > now || eventPromo.endDate < now)
+  ) {
+    return NextResponse.json(
+      { error: `Chương trình "${eventPromo.title}" đã hết hạn hoặc đang tạm tắt` },
+      { status: 400 }
+    );
+  }
+  if (couponCode) {
+    if (!couponPromo || !couponPromo.isActive || couponPromo.startDate > now || couponPromo.endDate < now) {
+      return NextResponse.json(
+        { error: `Mã giảm giá "${couponCode}" không hợp lệ hoặc đã hết hạn` },
+        { status: 400 }
+      );
+    }
+  }
+
+  const totals = calculateInvoiceTotals(
+    createdItems.map((i) => ({ category: i.category, totalPrice: i.totalPrice })),
+    eventPromo,
+    couponPromo && couponPromo.id !== eventPromo?.id ? couponPromo : null
+  );
+
+  let cashReceived: number | null = null;
+  let cashChange: number | null = null;
+  if (paymentMethod === "CASH") {
+    cashReceived = Number(body.cashReceived ?? totals.totalAmount);
+    if (!Number.isFinite(cashReceived) || cashReceived < totals.totalAmount) {
+      return NextResponse.json(
+        { error: "Số tiền khách đưa phải lớn hơn hoặc bằng tổng tiền thanh toán" },
+        { status: 400 }
+      );
+    }
+    cashChange = cashReceived - totals.totalAmount;
+  }
+
+  const paidAt = new Date();
   const invoice = await prisma.invoice.create({
     data: {
-      invoiceCode: generateShortCode("BL"),
+      invoiceCode,
       type: "RETAIL",
       guestName,
       guestPhone,
       petSummary: "Mua lẻ sản phẩm tại Shop",
-      subtotal,
-      totalAmount: subtotal,
-      status: "PENDING",
+      cashierId: session.userId,
+      subtotal: totals.subtotal,
+      eventDiscountAmount: totals.eventDiscountAmount,
+      couponDiscountAmount: totals.couponDiscountAmount,
+      totalAmount: totals.totalAmount,
+      appliedEventPromoId: eventPromo?.id ?? null,
+      appliedEventPromoTitle: eventPromo?.title ?? null,
+      appliedCouponCode: couponPromo?.code ?? null,
+      appliedCouponTitle: couponPromo?.title ?? null,
+      paymentMethod,
+      cashReceived,
+      cashChange,
+      status: "PAID",
+      paidAt,
       items: { create: createdItems },
     },
-    include: {
-      items: {
-        include: { product: { select: { id: true, stockQuantity: true, retailUnit: true } } },
-      },
-      auditLogs: true,
-    },
+    include: { items: true, auditLogs: true },
   });
 
-  return NextResponse.json({ invoice }, { status: 201 });
+  // Trừ tồn kho FEFO cho từng sản phẩm Shop
+  const negativeStockWarnings: string[] = [];
+  for (const item of createdItems) {
+    const res = await deductStockFEFO({
+      productId: item.productId,
+      quantity: item.quantity,
+      type: "SALE_DEDUCT",
+      referenceId: invoice.id,
+      note: `Xuất bán lẻ Shop ${invoice.invoiceCode}`,
+      actorId: session.userId,
+      actorName: session.fullName,
+    });
+    if (res.wentNegative) {
+      negativeStockWarnings.push(
+        `${item.name} (tồn tạm thời: ${res.newStockQuantity} ${item.unit})`
+      );
+    }
+  }
+
+  return NextResponse.json(
+    {
+      invoice,
+      negativeStockWarnings,
+      message:
+        negativeStockWarnings.length > 0
+          ? `Đã thanh toán đơn bán lẻ ${invoice.invoiceCode} & trừ kho FEFO. Lưu ý tồn âm tạm thời: ${negativeStockWarnings.join(", ")}.`
+          : `Đã thanh toán đơn bán lẻ ${invoice.invoiceCode} & trừ kho FEFO thành công!`,
+    },
+    { status: 201 }
+  );
 }

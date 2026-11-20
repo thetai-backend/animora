@@ -21,8 +21,8 @@ export default async function ManagerPortalPage({
   return (
     <RolePortalShell
       session={session}
-      pageTitle="Trung tâm Quản lý — Kho thông minh, Bệnh án & Đối soát"
-      pageSubtitle="Quản lý kho hợp nhất đa lô (quy đổi đơn vị nhập -> bán lẻ), cảnh báo đỏ lô dưới 30 ngày, phiếu xuất nội bộ/xuất hủy và tra cứu toàn bộ bệnh án & Audit Log."
+      pageTitle="Trung tâm Quản lý Toàn diện ANIMORA"
+      pageSubtitle="Báo cáo Doanh thu & Chốt ca, Kho thông minh FEFO, Hóa đơn & Hủy hoàn kho, Hồ sơ S.O.A.P, Nhân sự, Sự kiện Ưu đãi & CMS Trang Quảng cáo."
       notice={sp.notice}
     >
       <ManagerPortalClient />

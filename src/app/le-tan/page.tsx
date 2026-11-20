@@ -21,8 +21,8 @@ export default async function ReceptionPortalPage({
   return (
     <RolePortalShell
       session={session}
-      pageTitle="Bàn Lễ tân — Điều phối, Lịch trực & Thu ngân POS"
-      pageSubtitle="Tiếp đón Check-in, xử lý cảnh báo bác sĩ nghỉ đột xuất, điều phối ca Walk-in/Cấp cứu, thu ngân Tiền mặt/VietQR & trừ kho FEFO."
+      pageTitle="Bàn Lễ tân — Điều phối, Thu ngân POS, Nhắc hẹn & Chốt ca"
+      pageSubtitle="Tiếp đón Check-in, xử lý nghỉ đột xuất, Thu ngân POS (Phiếu Bác sĩ / Bán lẻ Shop), VietQR & FEFO, Nhắc hẹn tái khám, In A4 & Chốt ca cuối ngày."
       notice={sp.notice}
     >
       <ReceptionPortalClient />

@@ -18,7 +18,7 @@ export async function GET() {
         medicalRecord: { select: { id: true, recordCode: true, status: true } },
         items: {
           include: {
-            product: { select: { id: true, stockQuantity: true, retailUnit: true } },
+            product: { select: { id: true, stockQuantity: true, retailUnit: true, group: true } },
           },
         },
         auditLogs: { orderBy: { createdAt: "desc" } },
@@ -31,11 +31,12 @@ export async function GET() {
         customer: { select: { fullName: true, phone: true } },
         doctor: { select: { fullName: true } },
         cashier: { select: { fullName: true } },
+        medicalRecord: { select: { id: true, recordCode: true, status: true } },
         items: true,
         auditLogs: { orderBy: { createdAt: "desc" } },
       },
       orderBy: { paidAt: "desc" },
-      take: 20,
+      take: 40,
     }),
     prisma.promotion.findMany({
       where: {
@@ -46,11 +47,12 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     }),
     prisma.product.findMany({
-      where: { isActive: true, group: { in: ["SHOP", "MEDICINE"] } },
+      where: { isActive: true, group: { in: ["SHOP", "MEDICINE", "SHARED"] } },
       select: {
         id: true,
         sku: true,
         name: true,
+        brand: true,
         group: true,
         category: true,
         price: true,
@@ -63,6 +65,8 @@ export async function GET() {
       where: { id: "default" },
       select: {
         clinicName: true,
+        address: true,
+        phone: true,
         bankCode: true,
         bankAccountNumber: true,
         bankAccountName: true,
