@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import {
   CalendarPlus,
@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { AnimoraLogo } from "@/components/AnimoraLogo";
-import { Phase2NoticeModal } from "@/components/Phase2NoticeModal";
 
 interface HeroSectionProps {
   clinicName: string;
@@ -33,14 +32,12 @@ export function HeroSection({
   heroTitle,
   heroSubtitle,
   address,
-  phone,
   openTime,
   closeTime,
   doctorCount,
   serviceCount,
 }: HeroSectionProps) {
   const containerRef = useRef<HTMLElement>(null);
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -112,13 +109,13 @@ export function HeroSection({
               transition={{ duration: 0.55, delay: 0.28 }}
               className="flex flex-wrap items-center gap-4 pt-1"
             >
-              <button
-                onClick={() => setBookingModalOpen(true)}
+              <Link
+                href="/dat-lich"
                 className="inline-flex items-center gap-2.5 rounded-2xl bg-[#F97316] px-7 py-4 text-base font-bold text-white shadow-lg shadow-[#F97316]/30 transition hover:-translate-y-0.5 hover:bg-[#EA580C]"
               >
                 <CalendarPlus className="h-5 w-5" />
                 Đặt lịch khám / Spa ngay
-              </button>
+              </Link>
 
               <Link
                 href="#dich-vu"
@@ -239,13 +236,6 @@ export function HeroSection({
           </div>
         </div>
       </section>
-
-      <Phase2NoticeModal
-        open={bookingModalOpen}
-        mode="BOOKING"
-        phone={phone}
-        onClose={() => setBookingModalOpen(false)}
-      />
     </>
   );
 }

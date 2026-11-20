@@ -1,10 +1,26 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from ".prisma/client-animora";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+function getTodayStr(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function getDateOffsetStr(daysOffset: number): string {
+  const dt = new Date(Date.now() + daysOffset * 24 * 60 * 60 * 1000);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 async function main() {
-  console.log("🌿 Đang khởi tạo dữ liệu mẫu cho Phòng khám Thú y ANIMORA...");
+  console.log("🌿 Đang khởi tạo dữ liệu mẫu toàn diện cho ANIMORA (GD1 + GD2 + GD3)...");
 
   const defaultPasswordHash = await bcrypt.hash("Animora@123", 10);
 
@@ -45,7 +61,7 @@ async function main() {
   // ==========================================
   // 2. TÀI KHOẢN & NHÂN SỰ (4 VAI TRÒ + 3 BÁC SĨ)
   // ==========================================
-  await prisma.user.upsert({
+  const manager = await prisma.user.upsert({
     where: { email: "quanly@animora.vn" },
     update: {},
     create: {
@@ -61,7 +77,7 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const receptionist = await prisma.user.upsert({
     where: { email: "letan@animora.vn" },
     update: {},
     create: {
@@ -77,9 +93,9 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const docNam = await prisma.user.upsert({
     where: { email: "bacsi@animora.vn" },
-    update: {},
+    update: { workStatus: "AVAILABLE" },
     create: {
       email: "bacsi@animora.vn",
       passwordHash: defaultPasswordHash,
@@ -97,9 +113,9 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const docMinhAnh = await prisma.user.upsert({
     where: { email: "bs.minhanh@animora.vn" },
-    update: {},
+    update: { workStatus: "IN_EXAM" },
     create: {
       email: "bs.minhanh@animora.vn",
       passwordHash: defaultPasswordHash,
@@ -113,13 +129,13 @@ async function main() {
       specialty: "Da liễu, Miễn dịch & Dinh dưỡng lâm sàng",
       experienceYears: 8,
       bio: "Chuyên sâu điều trị viêm da cơ địa, nấm, ký sinh trùng và tư vấn chế độ dinh dưỡng cá nhân hóa cho mèo và chó giống nhỏ.",
-      workStatus: "AVAILABLE",
+      workStatus: "IN_EXAM",
     },
   });
 
-  await prisma.user.upsert({
+  const docQuocBao = await prisma.user.upsert({
     where: { email: "bs.quocbao@animora.vn" },
-    update: {},
+    update: { workStatus: "AVAILABLE" },
     create: {
       email: "bs.quocbao@animora.vn",
       passwordHash: defaultPasswordHash,
@@ -152,55 +168,113 @@ async function main() {
     },
   });
 
+  const customer2 = await prisma.user.upsert({
+    where: { email: "minhtuan@animora.vn" },
+    update: {},
+    create: {
+      email: "minhtuan@animora.vn",
+      passwordHash: defaultPasswordHash,
+      fullName: "Nguyễn Minh Tuấn",
+      phone: "0903 555 812",
+      address: "212 Điện Biên Phủ, Bình Thạnh, TP. Hồ Chí Minh",
+      role: "CUSTOMER",
+      isActive: true,
+      emailVerified: true,
+    },
+  });
+
+  // ==========================================
+  // 2B. LỊCH TRỰC TUẦN CỐ ĐỊNH (WORK SCHEDULE)
+  // ==========================================
+  const doctorsList = [docNam, docMinhAnh, docQuocBao];
+  for (const doc of doctorsList) {
+    for (let dow = 0; dow <= 6; dow++) {
+      // Xoay ca hợp lý, luôn có ít nhất 2 bác sĩ trực mỗi ca
+      const morningShift = doc.id === docQuocBao.id && dow === 0 ? false : true;
+      const afternoonShift = doc.id === docMinhAnh.id && dow === 1 ? false : true;
+      await prisma.workSchedule.upsert({
+        where: { doctorId_dayOfWeek: { doctorId: doc.id, dayOfWeek: dow } },
+        update: { morningShift, afternoonShift },
+        create: {
+          doctorId: doc.id,
+          dayOfWeek: dow,
+          morningShift,
+          afternoonShift,
+        },
+      });
+    }
+  }
+
   // ==========================================
   // 3. HỒ SƠ THÚ CƯNG MẪU CHO KHÁCH HÀNG
   // ==========================================
-  const existingPets = await prisma.pet.count({
-    where: { ownerId: customer.id },
-  });
+  let petBo = await prisma.pet.findFirst({ where: { ownerId: customer.id, name: "Bơ" } });
+  if (!petBo) {
+    petBo = await prisma.pet.create({
+      data: {
+        ownerId: customer.id,
+        name: "Bơ",
+        species: "DOG",
+        breed: "Corgi Pembroke",
+        birthDate: new Date("2023-05-14"),
+        gender: "MALE",
+        isNeutered: true,
+        coatDescription: "Vàng trắng, lông dày 2 lớp",
+        microchipCode: "900118004529104",
+        allergies: "Nhạy cảm nhẹ với thịt gà công nghiệp",
+        vaccinationHistory: "Đã tiêm đủ 3 mũi 7 bệnh + Dại định kỳ tháng 05/2026",
+        dewormingHistory: "Tẩy giun Drontal Plus định kỳ 3 tháng/lần",
+        status: "ALIVE",
+      },
+    });
+  }
 
-  if (existingPets === 0) {
-    await prisma.pet.createMany({
-      data: [
-        {
-          ownerId: customer.id,
-          name: "Bơ",
-          species: "DOG",
-          breed: "Corgi Pembroke",
-          birthDate: new Date("2023-05-14"),
-          gender: "MALE",
-          isNeutered: true,
-          coatDescription: "Vàng trắng, lông dày 2 lớp",
-          microchipCode: "900118004529104",
-          allergies: "Nhạy cảm nhẹ với thịt gà công nghiệp",
-          vaccinationHistory: "Đã tiêm đủ 3 mũi 7 bệnh + Dại định kỳ tháng 05/2026",
-          dewormingHistory: "Tẩy giun Drontal Plus định kỳ 3 tháng/lần",
-          status: "ALIVE",
-        },
-        {
-          ownerId: customer.id,
-          name: "Mochi",
-          species: "CAT",
-          breed: "Mèo Anh Lông Ngắn (Bicolor)",
-          birthDate: new Date("2024-02-20"),
-          gender: "FEMALE",
-          isNeutered: false,
-          coatDescription: "Xám trắng Bicolor, lông mịn ngắn",
-          microchipCode: "900118004529882",
-          allergies: "Chưa ghi nhận dị ứng",
-          vaccinationHistory: "Đã tiêm đủ 2 mũi 4 bệnh mèo (FVRCP)",
-          dewormingHistory: "Nhỏ gáy Revolution Plus hàng tháng",
-          status: "ALIVE",
-        },
-      ],
+  let petMochi = await prisma.pet.findFirst({ where: { ownerId: customer.id, name: "Mochi" } });
+  if (!petMochi) {
+    petMochi = await prisma.pet.create({
+      data: {
+        ownerId: customer.id,
+        name: "Mochi",
+        species: "CAT",
+        breed: "Mèo Anh Lông Ngắn (Bicolor)",
+        birthDate: new Date("2024-02-20"),
+        gender: "FEMALE",
+        isNeutered: false,
+        coatDescription: "Xám trắng Bicolor, lông mịn ngắn",
+        microchipCode: "900118004529882",
+        allergies: "Chưa ghi nhận dị ứng",
+        vaccinationHistory: "Đã tiêm đủ 2 mũi 4 bệnh mèo (FVRCP)",
+        dewormingHistory: "Nhỏ gáy Revolution Plus hàng tháng",
+        status: "ALIVE",
+      },
+    });
+  }
+
+  let petMilo = await prisma.pet.findFirst({ where: { ownerId: customer2.id, name: "Milo" } });
+  if (!petMilo) {
+    petMilo = await prisma.pet.create({
+      data: {
+        ownerId: customer2.id,
+        name: "Milo",
+        species: "DOG",
+        breed: "Poodle Toy",
+        birthDate: new Date("2022-09-10"),
+        gender: "MALE",
+        isNeutered: true,
+        coatDescription: "Nâu đỏ xoăn nhẹ",
+        microchipCode: "900118009912345",
+        allergies: "Không",
+        vaccinationHistory: "Đủ 7 bệnh + Dại 2026",
+        dewormingHistory: "NexGard Spectra hàng tháng",
+        status: "ALIVE",
+      },
     });
   }
 
   // ==========================================
   // 4. DỊCH VỤ & BẢNG GIÁ CỐ ĐỊNH (Y TẾ & SPA)
   // ==========================================
-  const services = [
-    // --- NHÓM Y TẾ ---
+  const servicesData = [
     {
       slug: "kham-lam-sang-tong-quat",
       name: "Khám lâm sàng tổng quát",
@@ -273,8 +347,6 @@ async function main() {
         "Khám tiền mê, kiểm tra chỉ số sinh tồn và đặt đường truyền bảo vệ\nThực hiện phẫu thuật vô trùng theo quy trình chuẩn y khoa\nGiảm đau hậu phẫu, theo dõi hồi tỉnh tại phòng riêng và hướng dẫn chăm sóc vết mổ tại nhà",
       sortOrder: 6,
     },
-
-    // --- NHÓM SPA / GROOMING ---
     {
       slug: "tam-ve-sinh-co-ban",
       name: "Gói Tắm vệ sinh & Chăm sóc toàn diện",
@@ -337,18 +409,21 @@ async function main() {
     },
   ];
 
-  for (const srv of services) {
-    await prisma.service.upsert({
+  const serviceMap: Record<string, { id: string; name: string; category: string; price: number; durationMinutes: number }> = {};
+  for (const srv of servicesData) {
+    const saved = await prisma.service.upsert({
       where: { slug: srv.slug },
       update: {},
       create: srv,
     });
+    serviceMap[srv.slug] = saved;
   }
 
   // ==========================================
-  // 5. SẢN PHẨM TẠI SHOP (CHỈ THAM KHẢO MUA TẠI QUẦY)
+  // 5. KHO HỢP NHẤT: SHOP + THUỐC Y TẾ + VẬT TƯ TIÊU HAO
   // ==========================================
-  const products = [
+  const productsData = [
+    // --- SHOP ---
     {
       slug: "royal-canin-indoor-27-meo-trong-nha",
       sku: "SP-RC-IN27",
@@ -366,15 +441,12 @@ async function main() {
       shortDescription:
         "Công thức cân bằng năng lượng cho mèo trưởng thành ít vận động, giảm rõ rệt mùi phân và hỗ trợ đào thải búi lông.",
       ingredients:
-        "Protein gia cầm sấy khô (L.I.P dễ tiêu hóa trên 90%), gạo, lúa mì, ngô, protein thực vật phân lập, mỡ động vật, chất xơ thực vật, bột củ cải đường, khoáng chất, dầu đậu nành, Fructo-oligo-saccharides (FOS), men bia, dầu cá giàu EPA & DHA, vỏ hạt mã đề (Psyllium).",
+        "Protein gia cầm sấy khô (L.I.P dễ tiêu hóa trên 90%), gạo, lúa mì, ngô, chất xơ thực vật, dầu cá giàu EPA & DHA, vỏ hạt mã đề (Psyllium).",
       benefits:
-        "• Giảm mùi phân lên tới 60% nhờ nguồn đạm siêu tiêu hóa L.I.P.\n• Kiểm soát cân nặng hợp lý cho mèo nuôi trong căn hộ ít vận động.\n• Hỗ trợ đào thải búi lông tự nhiên qua đường tiêu hóa nhờ sợi Psyllium.\n• Bảo vệ sức khỏe đường tiết niệu với tỷ lệ khoáng chất cân đối.",
-      suitableFor:
-        "Mèo trưởng thành từ 1 đến 7 tuổi sống hoàn toàn trong nhà (Anh lông ngắn, Anh lông dài, Mèo ta, Ba Tư, Munchkin...).",
-      usageInstructions:
-        "• Mèo 3kg: 45g/ngày.\n• Mèo 4kg: 55g/ngày.\n• Mèo 5kg: 65g/ngày.\nChia làm 2–3 bữa nhỏ trong ngày và luôn chuẩn bị sẵn nước sạch bên cạnh. Khi đổi hạt mới, trộn tăng dần trong 7 ngày.",
-      storageInstructions:
-        "Kéo kín khóa zip ngay sau khi lấy hạt. Bảo quản nơi khô ráo, thoáng mát, tránh ánh nắng trực tiếp và độ ẩm cao.",
+        "• Giảm mùi phân lên tới 60% nhờ nguồn đạm siêu tiêu hóa L.I.P.\n• Kiểm soát cân nặng hợp lý cho mèo nuôi trong căn hộ.\n• Hỗ trợ đào thải búi lông tự nhiên.",
+      suitableFor: "Mèo trưởng thành từ 1 đến 7 tuổi sống hoàn toàn trong nhà.",
+      usageInstructions: "Mèo 3kg: 45g/ngày; Mèo 4kg: 55g/ngày; Mèo 5kg: 65g/ngày.",
+      storageInstructions: "Kéo kín khóa zip sau khi lấy hạt, bảo quản nơi khô ráo.",
       isFeaturedOnWeb: true,
     },
     {
@@ -393,16 +465,11 @@ async function main() {
       imageUrl: "/images/product-food.jpg",
       shortDescription:
         "Hạt nhỏ thơm ngon dành riêng cho chó dưới 10kg (Poodle, Corgi, Phốc sóc), giúp giữ dáng khỏe và bóng mượt lông.",
-      ingredients:
-        "Ngô, bột ngô, protein gia cầm sấy khô, mỡ động vật, gluten ngô, protein động vật thủy phân, bột củ cải đường, dầu đậu nành, dầu cá (giàu EPA & DHA), nấm men, khoáng chất, L-carnitine và nhóm vitamin A, D3, E.",
-      benefits:
-        "• Bổ sung L-carnitine hỗ trợ chuyển hóa chất béo, duy trì vóc dáng cân đối.\n• Cỡ hạt nhỏ được thiết kế riêng cho khuôn hàm chó giống nhỏ, hỗ trợ giảm mảng bám răng.\n• Giàu Omega-3 (EPA/DHA) giúp da khỏe và bộ lông mềm mượt.",
-      suitableFor:
-        "Chó trưởng thành từ 10 tháng đến 8 tuổi có cân nặng dưới 10kg như Poodle, Pomeranian, Chihuahua, Pug, Corgi nhỏ.",
-      usageInstructions:
-        "• Chó 2kg: 47g/ngày.\n• Chó 5kg: 94g/ngày.\n• Chó 8kg: 134g/ngày.\nCó thể cho ăn khô hoặc trộn thêm 1 thìa pate ấm cho bé kén ăn.",
-      storageInstructions:
-        "Đóng chặt miệng túi sau mỗi lần dùng, để nơi thoáng mát dưới 30°C. Sử dụng tốt nhất trong vòng 45 ngày sau khi mở túi.",
+      ingredients: "Ngô, protein gia cầm sấy khô, mỡ động vật, dầu cá (EPA & DHA), L-carnitine, vitamin A, D3, E.",
+      benefits: "• Duy trì vóc dáng cân đối.\n• Cỡ hạt nhỏ phù hợp hàm chó nhỏ.\n• Giàu Omega-3 giúp lông mềm mượt.",
+      suitableFor: "Chó trưởng thành từ 10 tháng đến 8 tuổi dưới 10kg.",
+      usageInstructions: "Chó 2kg: 47g/ngày; Chó 5kg: 94g/ngày; Chó 8kg: 134g/ngày.",
+      storageInstructions: "Đóng chặt miệng túi sau mỗi lần dùng, tránh ẩm.",
       isFeaturedOnWeb: true,
     },
     {
@@ -421,16 +488,11 @@ async function main() {
       imageUrl: "/images/product-food.jpg",
       shortDescription:
         "Pate siêu mịn giàu năng lượng chuyên dùng cho chó mèo biếng ăn, sau phẫu thuật, sau sinh hoặc đang hồi sức.",
-      ingredients:
-        "Thịt và các sản phẩm phụ từ thịt gia cầm, dầu cá tinh luyện, ngũ cốc, dẫn xuất thực vật, sữa và dẫn xuất sữa, khoáng chất thiết yếu, phức hợp chất chống oxy hóa (Vitamin E, C, Taurine, Lutein).",
-      benefits:
-        "• Mật độ năng lượng cao giúp bé nạp đủ dưỡng chất ngay cả khi ăn lượng rất ít.\n• Kết cấu mousse siêu mịn dễ liếm, dễ tiêu hóa và có thể bơm qua ống cho ăn khi cần.\n• Giàu đạm chất lượng cao giúp nhanh lành vết mổ và phục hồi khối cơ.",
-      suitableFor:
-        "Chó và mèo ở mọi lứa tuổi đang suy nhược, kén ăn, vừa triệt sản/phẫu thuật hoặc đang trong giai đoạn điều trị nội trú.",
-      usageInstructions:
-        "Cho ăn trực tiếp ở nhiệt độ phòng hoặc làm ấm nhẹ để tăng mùi thơm. Liều lượng tham khảo: 1/2 – 1 lon/ngày cho bé 4kg (hoặc theo chỉ định bác sĩ tại phòng khám).",
-      storageInstructions:
-        "Sau khi mở nắp lon, đậy kín bằng nắp silicon và bảo quản ngăn mát tủ lạnh, dùng hết trong vòng 48 giờ.",
+      ingredients: "Thịt gia cầm, dầu cá tinh luyện, khoáng chất thiết yếu, Vitamin E, C, Taurine.",
+      benefits: "• Mật độ năng lượng cao.\n• Kết cấu mousse siêu mịn dễ liếm.\n• Hỗ trợ nhanh lành vết mổ.",
+      suitableFor: "Chó và mèo suy nhược, kén ăn hoặc vừa phẫu thuật.",
+      usageInstructions: "1/2 – 1 lon/ngày cho bé 4kg hoặc theo chỉ định bác sĩ.",
+      storageInstructions: "Đậy kín nắp bảo quản tủ lạnh dùng trong 48 giờ sau khi mở.",
       isFeaturedOnWeb: true,
     },
     {
@@ -445,20 +507,15 @@ async function main() {
       importUnit: "Thùng",
       retailUnit: "Chai",
       conversionRate: 12,
-      stockQuantity: 11,
+      stockQuantity: 12,
       imageUrl: "/images/product-care.jpg",
       shortDescription:
         "Công thức không xà phòng pH chuẩn 6.5–7.0 dịu nhẹ cho da nhạy cảm, giúp làm dịu ngứa rát và giảm rụng lông.",
-      ingredients:
-        "Chiết xuất yến mạch keo (Colloidal Oatmeal 2%), tinh chất lô hội hữu cơ, Glycerin thực vật, Panthenol (Pro-Vitamin B5), Ceramide phục hồi biểu bì, nước tinh khiết. Không chứa Paraben, không Sulfate, không hương liệu hóa học gắt.",
-      benefits:
-        "• Làm dịu nhanh vùng da mẩn đỏ, khô bong vảy và giảm hành vi gãi ngứa.\n• Cân bằng độ pH tự nhiên cho da chó mèo, bảo vệ lớp dầu tự nhiên.\n• Giúp bộ lông tơi mềm, thơm dịu nhẹ hương thảo mộc thiên nhiên.",
-      suitableFor:
-        "Chó và mèo trên 8 tuần tuổi, đặc biệt phù hợp với bé có làn da nhạy cảm, dễ kích ứng hoặc đang phục hồi sau viêm da.",
-      usageInstructions:
-        "Làm ướt đều lông bằng nước ấm, lấy 10–15ml sữa tắm tạo bọt và massage nhẹ nhàng toàn thân trong 5 phút, sau đó xả sạch với nước và sấy khô hoàn toàn.",
-      storageInstructions:
-        "Đậy kín nắp sau khi dùng, để nơi khô thoáng, tránh ánh nắng trực tiếp và xa tầm tay trẻ em.",
+      ingredients: "Chiết xuất yến mạch keo 2%, lô hội hữu cơ, Panthenol B5, Ceramide.",
+      benefits: "• Làm dịu nhanh vùng da mẩn đỏ, ngứa.\n• Cân bằng pH tự nhiên cho da thú cưng.",
+      suitableFor: "Chó và mèo trên 8 tuần tuổi có da nhạy cảm.",
+      usageInstructions: "Làm ướt lông, massage 5 phút rồi xả sạch và sấy khô.",
+      storageInstructions: "Đậy kín nắp, để nơi khô thoáng.",
       isFeaturedOnWeb: true,
     },
     {
@@ -473,76 +530,15 @@ async function main() {
       importUnit: "Hộp",
       retailUnit: "Chai",
       conversionRate: 10,
-      stockQuantity: 9,
+      stockQuantity: 10,
       imageUrl: "/images/product-care.jpg",
       shortDescription:
         "Dung dịch làm sạch ráy tai, khử mùi hôi và ngăn ngừa vi khuẩn/nấm tai phát triển, không gây xót rát.",
-      ingredients:
-        "Salicylic acid 0.2%, Docusate sodium, PCMX, EDTA, Monosaccharides giúp giảm bám dính vi khuẩn trên niêm mạc ống tai, độ pH trung tính không chứa cồn.",
-      benefits:
-        "• Làm mềm và đẩy sạch ráy tai tích tụ sâu bên trong ống tai.\n• Khử mùi hôi tai hiệu quả và làm khô thoáng ống tai sau khi tắm.\n• Hỗ trợ phòng ngừa viêm tai ngoài tái phát ở chó tai cụp (Poodle, Cocker, Corgi...).",
-      suitableFor:
-        "Chó và mèo ở mọi lứa tuổi dùng vệ sinh tai định kỳ hàng tuần hoặc trước khi nhỏ thuốc điều trị viêm tai.",
-      usageInstructions:
-        "Nhỏ 5–8 giọt trực tiếp vào ống tai, massage nhẹ phần gốc tai khoảng 30 giây để bé tự lắc đẩy ráy ra ngoài, sau đó dùng bông gòn sạch lau nhẹ vành tai. Dùng 1–2 lần/tuần.",
-      storageInstructions:
-        "Bảo quản ở nhiệt độ phòng (15–30°C), đóng chặt vòi nhỏ sau mỗi lần sử dụng.",
-      isFeaturedOnWeb: true,
-    },
-    {
-      slug: "dau-ca-hoi-omega-3-duong-da-long",
-      sku: "SP-SUP-OMG",
-      name: "Dầu cá hồi Na Uy tinh khiết Omega-3 & 6 (Chai 250ml)",
-      brand: "Nordic Pet Care",
-      group: "SHOP",
-      category: "Thực phẩm bổ sung",
-      targetSpecies: "BOTH",
-      price: 340000,
-      importUnit: "Thùng",
-      retailUnit: "Chai",
-      conversionRate: 12,
-      stockQuantity: 16,
-      imageUrl: "/images/product-care.jpg",
-      shortDescription:
-        "100% dầu cá hồi ép lạnh nguyên chất giàu EPA & DHA giúp giảm rụng lông rõ rệt sau 3 tuần và hỗ trợ tim mạch.",
-      ingredients:
-        "100% dầu cá hồi Đại Tây Dương ép lạnh (Salmo salar), tự nhiên giàu Omega-3 (EPA tối thiểu 8%, DHA tối thiểu 10%), Omega-6 và Vitamin E tự nhiên (Tocopherol) chống oxy hóa.",
-      benefits:
-        "• Giảm tình trạng rụng lông theo mùa, khắc phục da khô gàu và giúp lông bóng mượt.\n• Tăng cường đề kháng, hỗ trợ chức năng tim mạch và xương khớp cho thú cưng lớn tuổi.\n• Kích thích vị giác thơm tự nhiên cho các bé lười ăn hạt.",
-      suitableFor:
-        "Chó và mèo từ 3 tháng tuổi trở lên, đặc biệt hữu ích cho chó lông dày (Corgi, Samoyed, Poodle) và mèo lông dài.",
-      usageInstructions:
-        "Nhấn vòi trộn trực tiếp vào thức ăn hàng ngày:\n• Dưới 5kg: 1 lần nhấn (2ml)/ngày.\n• Từ 5–15kg: 2 lần nhấn (4ml)/ngày.\n• Trên 15kg: 3 lần nhấn (6ml)/ngày.",
-      storageInstructions:
-        "Bảo quản nơi râm mát hoặc ngăn mát tủ lạnh sau khi mở nắp để giữ trọn độ tươi của Omega-3.",
-      isFeaturedOnWeb: true,
-    },
-    {
-      slug: "gel-dinh-duong-vitamin-nutri-plus",
-      sku: "SP-SUP-NPG",
-      name: "Gel Dinh dưỡng Đa Vitamin Nutri-Plus Gel (Tuýp 120.5g)",
-      brand: "Virbac (Pháp)",
-      group: "SHOP",
-      category: "Thực phẩm bổ sung",
-      targetSpecies: "BOTH",
-      price: 275000,
-      importUnit: "Hộp",
-      retailUnit: "Tuýp",
-      conversionRate: 12,
-      stockQuantity: 15,
-      imageUrl: "/images/product-care.jpg",
-      shortDescription:
-        "Gel bổ sung năng lượng tức thì và 10 loại vitamin khoáng chất thiết yếu, hương vị thơm ngon dễ liếm.",
-      ingredients:
-        "Siro glucose, dầu đậu nành, dầu cá tuyết, mật rỉ đường, protein động vật thủy phân, Vitamin A, D3, E, B1, B2, B6, B12, Niacinamide, Folic acid, Sắt, Mangan và Magie.",
-      benefits:
-        "• Bổ sung năng lượng nhanh chóng cho chó mèo con đang lớn, chó mèo mang thai hoặc cho con bú.\n• Hỗ trợ hồi sức nhanh sau tiêm phòng, sau bệnh hoặc di chuyển đường dài.\n• Kích thích ăn ngon miệng cho thú cưng kén ăn.",
-      suitableFor:
-        "Chó mèo từ 2 tháng tuổi trở lên cần bổ sung vitamin, tăng sức đề kháng hoặc phục hồi thể trạng.",
-      usageInstructions:
-        "Cho liếm trực tiếp từ đầu ngón tay hoặc trộn vào thức ăn: 1–2 thìa cà phê (khoảng 5cm gel) cho mỗi 5kg thể trọng/ngày.",
-      storageInstructions:
-        "Đậy kín nắp tuýp, bảo quản ở nơi khô ráo dưới 25°C, tránh nhiệt độ cao làm tách dầu.",
+      ingredients: "Salicylic acid 0.2%, Docusate sodium, PCMX, EDTA, pH trung tính.",
+      benefits: "• Làm mềm và đẩy sạch ráy tai.\n• Hỗ trợ phòng ngừa viêm tai ngoài tái phát.",
+      suitableFor: "Chó và mèo vệ sinh tai định kỳ hàng tuần.",
+      usageInstructions: "Nhỏ 5–8 giọt vào ống tai, massage gốc tai 30 giây rồi lau sạch.",
+      storageInstructions: "Nhiệt độ phòng 15–30°C.",
       isFeaturedOnWeb: true,
     },
     {
@@ -557,48 +553,364 @@ async function main() {
       importUnit: "Thùng",
       retailUnit: "Cái",
       conversionRate: 20,
-      stockQuantity: 0,
+      stockQuantity: 0, // Cố tình tồn = 0 để test cảnh báo đỏ + tồn kho âm tạm thời!
       imageUrl: "/images/product-care.jpg",
       shortDescription:
         "Răng thép không gỉ uốn cong 135° có hạt nhựa massage tròn đầu, lấy sạch lông rụng mà không làm xước da bé.",
-      ingredients:
-        "Thân lược nhựa ABS cao cấp chống trượt, đệm cao su đàn hồi, răng chải bằng thép không gỉ 304 có đầu bọc hạt nhựa mềm an toàn, nút bấm đẩy lông 1 chạm.",
-      benefits:
-        "• Loại bỏ đến 90% lông rụng bám ẩn sâu trong lớp lông tơ, giúp nhà cửa sạch lông.\n• Kích thích tuần hoàn máu dưới da nhờ đầu răng massage êm ái.\n• Nút bấm tự đẩy mảng lông gọn gàng chỉ trong 1 giây, dễ vệ sinh.",
-      suitableFor:
-        "Mọi giống chó và mèo lông ngắn lẫn lông dài (Poodle, Corgi, Mèo Anh, Mèo Ba Tư, Golden...).",
-      usageInstructions:
-        "Chải nhẹ theo chiều mọc của lông từ cổ xuống đuôi 3–5 phút mỗi lần, 2–3 lần/tuần. Nhấn nút sau lưng lược để gỡ bỏ phần lông đã chải.",
-      storageInstructions:
-        "Rửa sạch phần răng lược với nước ấm định kỳ, lau khô hoàn toàn và bảo quản nơi khô ráo.",
+      ingredients: "Nhựa ABS cao cấp, răng thép không gỉ 304 bọc đầu hạt nhựa.",
+      benefits: "• Loại bỏ 90% lông rụng.\n• Nút bấm đẩy lông 1 chạm.",
+      suitableFor: "Mọi giống chó mèo lông ngắn và lông dài.",
+      usageInstructions: "Chải nhẹ theo chiều lông 2–3 lần/tuần.",
+      storageInstructions: "Rửa sạch và để khô ráo.",
       isFeaturedOnWeb: true,
+    },
+
+    // --- THUỐC Y TẾ (MEDICINE) ---
+    {
+      slug: "thuoc-khang-sinh-amoxicillin-clavulanate-250mg",
+      sku: "TH-AMOX-250",
+      name: "Kháng sinh thú y Amoxicillin-Clavulanate 250mg (Clavamox)",
+      brand: "Zoetis (Mỹ)",
+      group: "MEDICINE",
+      category: "Thuốc kê đơn",
+      targetSpecies: "BOTH",
+      price: 18000,
+      importUnit: "Hộp",
+      retailUnit: "Viên",
+      conversionRate: 14,
+      stockQuantity: 42,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Kháng sinh phổ rộng điều trị nhiễm khuẩn hô hấp, da, tiết niệu và mô mềm ở chó mèo.",
+      ingredients: "Amoxicillin 200mg + Clavulanic acid 50mg.",
+      benefits: "Điều trị hiệu quả nhiễm khuẩn đường hô hấp và viêm da mủ.",
+      suitableFor: "Chó mèo theo chỉ định của bác sĩ thú y.",
+      usageInstructions: "Uống 12.5mg/kg mỗi 12 giờ sau ăn theo đơn bác sĩ.",
+      storageInstructions: "Nơi khô ráo dưới 25°C, tránh ánh sáng.",
+      isFeaturedOnWeb: false,
+    },
+    {
+      slug: "thuoc-nho-tai-surolan-15ml",
+      sku: "TH-SURO-15",
+      name: "Thuốc nhỏ tai đặc trị viêm tai Surolan (Lọ 15ml)",
+      brand: "Elanco (Bỉ)",
+      group: "MEDICINE",
+      category: "Thuốc kê đơn",
+      targetSpecies: "BOTH",
+      price: 245000,
+      importUnit: "Hộp",
+      retailUnit: "Lọ",
+      conversionRate: 10,
+      stockQuantity: 8,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Đặc trị viêm tai ngoài do vi khuẩn, nấm men Malassezia và ký sinh trùng tai ở chó mèo.",
+      ingredients: "Miconazole nitrate, Polymyxin B sulfate, Prednisolone acetate.",
+      benefits: "Giảm nhanh ngứa rát, sưng đỏ và tiêu diệt nấm/vi khuẩn ống tai.",
+      suitableFor: "Chó mèo bị viêm tai ngoài (màng nhĩ còn nguyên vẹn).",
+      usageInstructions: "Lắc kỹ trước khi nhỏ 3–5 giọt/tai, 2 lần/ngày trong 7 ngày.",
+      storageInstructions: "Nhiệt độ dưới 25°C.",
+      isFeaturedOnWeb: false,
+    },
+    {
+      slug: "men-tieu-hoa-bio-flora-goi",
+      sku: "TH-BIOF-5G",
+      name: "Men tiêu hóa sống phục hồi đường ruột Bio-Flora (Gói 5g)",
+      brand: "BioPharmachemie",
+      group: "MEDICINE",
+      category: "Thuốc hỗ trợ",
+      targetSpecies: "BOTH",
+      price: 15000,
+      importUnit: "Hộp",
+      retailUnit: "Gói",
+      conversionRate: 20,
+      stockQuantity: 35,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Bổ sung lợi khuẩn Lactobacillus & Bacillus hỗ trợ cầm tiêu chảy, rối loạn tiêu hóa và kích thích ăn.",
+      ingredients: "Bacillus subtilis, Lactobacillus acidophilus, Enzyme tiêu hóa.",
+      benefits: "Cân bằng hệ vi sinh đường ruột, giảm mùi phân.",
+      suitableFor: "Chó mèo đang dùng kháng sinh hoặc rối loạn tiêu hóa.",
+      usageInstructions: "Pha nước ấm hoặc trộn thức ăn 1 gói/lần, ngày 2 lần.",
+      storageInstructions: "Nơi khô mát.",
+      isFeaturedOnWeb: false,
+    },
+    {
+      slug: "thuoc-khang-viem-giam-dau-meloxicam-15mg",
+      sku: "TH-MELO-15",
+      name: "Thuốc kháng viêm giảm đau Meloxicam thú y (Viên nhai)",
+      brand: "Boehringer Ingelheim",
+      group: "MEDICINE",
+      category: "Thuốc kê đơn",
+      targetSpecies: "DOG",
+      price: 22000,
+      importUnit: "Hộp",
+      retailUnit: "Viên",
+      conversionRate: 10,
+      stockQuantity: 20,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Giảm đau và kháng viêm hậu phẫu, đau cơ xương khớp cấp và mãn tính cho chó.",
+      ingredients: "Meloxicam 1.5mg.",
+      benefits: "Giảm sưng đau nhanh, vị bò dễ ăn.",
+      suitableFor: "Chó theo kê đơn bác sĩ.",
+      usageInstructions: "Uống sau ăn no theo đúng cân nặng bác sĩ kê.",
+      storageInstructions: "Nơi khô ráo dưới 30°C.",
+      isFeaturedOnWeb: false,
+    },
+
+    // --- VẬT TƯ TIÊU HAO (SUPPLY) ---
+    {
+      slug: "kim-tiem-1ml-vo-trung",
+      sku: "VT-KIM-1ML",
+      name: "Bơm kim tiêm vô trùng 1ml dùng 1 lần (Cái)",
+      brand: "Vinahankook",
+      group: "SUPPLY",
+      category: "Vật tư tiêu hao",
+      targetSpecies: "BOTH",
+      price: 2000,
+      importUnit: "Hộp",
+      retailUnit: "Cái",
+      conversionRate: 100,
+      stockQuantity: 180,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Bơm kim tiêm 1ml vô trùng đầu kim siêu mảnh dùng trong tiêm phòng và tiêm thuốc thú nhỏ.",
+      ingredients: "Nhựa y tế PP, kim thép không gỉ vô trùng EO.",
+      benefits: "Giảm đau khi tiêm cho chó mèo.",
+      suitableFor: "Sử dụng nội bộ tại phòng khám.",
+      usageInstructions: "Sử dụng 1 lần duy nhất, hủy vào hộp vật sắc nhọn.",
+      storageInstructions: "Nơi khô ráo sạch sẽ.",
+      isFeaturedOnWeb: false,
+    },
+    {
+      slug: "bong-y-te-tham-nuoc-con-70",
+      sku: "VT-CON-70",
+      name: "Cồn sát khuẩn 70 độ y tế (Chai 500ml)",
+      brand: "OPC Pharma",
+      group: "SUPPLY",
+      category: "Vật tư tiêu hao",
+      targetSpecies: "BOTH",
+      price: 35000,
+      importUnit: "Thùng",
+      retailUnit: "Chai",
+      conversionRate: 20,
+      stockQuantity: 15,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription: "Dung dịch Ethanol 70% sát khuẩn vùng da tiêm truyền và dụng cụ phòng khám.",
+      ingredients: "Ethanol 70%, nước tinh khiết.",
+      benefits: "Sát khuẩn nhanh, bay hơi sạch.",
+      suitableFor: "Sử dụng nội bộ phòng khám.",
+      usageInstructions: "Thấm bông gòn lau sát khuẩn ngoài da.",
+      storageInstructions: "Đậy kín nắp, tránh nguồn lửa.",
+      isFeaturedOnWeb: false,
     },
   ];
 
-  for (const prod of products) {
-    await prisma.product.upsert({
+  const productMap: Record<string, { id: string; sku: string; name: string; price: number; retailUnit: string; conversionRate: number; stockQuantity: number }> = {};
+  for (const prod of productsData) {
+    const saved = await prisma.product.upsert({
       where: { slug: prod.slug },
-      update: {},
+      update: { stockQuantity: prod.stockQuantity },
       create: prod,
+    });
+    productMap[prod.sku] = saved;
+  }
+
+  // ==========================================
+  // 5B. LÔ HÀNG ĐA LÔ (INVENTORY BATCH) - CÓ LÔ DƯỚI 30 NGÀY HẾT HẠN!
+  // ==========================================
+  const now = new Date();
+  const in12Days = new Date(now.getTime() + 12 * 24 * 60 * 60 * 1000); // < 30 ngày -> Cảnh báo ĐỎ!
+  const in22Days = new Date(now.getTime() + 22 * 24 * 60 * 60 * 1000); // < 30 ngày -> Cảnh báo ĐỎ!
+  const in180Days = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
+  const in365Days = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+
+  const existingBatches = await prisma.inventoryBatch.count();
+  if (existingBatches === 0) {
+    const batchSeeds = [
+      // Kháng sinh Amoxicillin: 1 lô sắp hết hạn (12 ngày) + 1 lô mới (365 ngày) -> test FEFO!
+      {
+        sku: "TH-AMOX-250",
+        batchNumber: "AMOX-26A1",
+        expiryDate: in12Days,
+        importedPackages: 1,
+        conversionRate: 14,
+        initialQuantity: 14,
+        remainingQuantity: 14,
+        importNote: "Lô cận date - ưu tiên xuất trước FEFO",
+      },
+      {
+        sku: "TH-AMOX-250",
+        batchNumber: "AMOX-27B2",
+        expiryDate: in365Days,
+        importedPackages: 2,
+        conversionRate: 14,
+        initialQuantity: 28,
+        remainingQuantity: 28,
+        importNote: "Lô nhập mới quý IV",
+      },
+      // Thuốc nhỏ tai Surolan: lô còn 22 ngày hết hạn!
+      {
+        sku: "TH-SURO-15",
+        batchNumber: "SURO-26C9",
+        expiryDate: in22Days,
+        importedPackages: 1,
+        conversionRate: 10,
+        initialQuantity: 10,
+        remainingQuantity: 8,
+        importNote: "Cần theo dõi hạn dùng dưới 30 ngày",
+      },
+      // Men tiêu hóa Bio-Flora
+      {
+        sku: "TH-BIOF-5G",
+        batchNumber: "BIOF-2701",
+        expiryDate: in180Days,
+        importedPackages: 2,
+        conversionRate: 20,
+        initialQuantity: 40,
+        remainingQuantity: 35,
+        importNote: "Nhập kho định kỳ",
+      },
+      // Kháng viêm Meloxicam
+      {
+        sku: "TH-MELO-15",
+        batchNumber: "MELO-2705",
+        expiryDate: in365Days,
+        importedPackages: 2,
+        conversionRate: 10,
+        initialQuantity: 20,
+        remainingQuantity: 20,
+        importNote: "Nhập kho định kỳ",
+      },
+      // Shop products
+      {
+        sku: "SP-RC-IN27",
+        batchNumber: "RC27-2708",
+        expiryDate: in365Days,
+        importedPackages: 3,
+        conversionRate: 6,
+        initialQuantity: 18,
+        remainingQuantity: 18,
+      },
+      {
+        sku: "SP-RC-MINI",
+        batchNumber: "RCMN-2708",
+        expiryDate: in365Days,
+        importedPackages: 3,
+        conversionRate: 6,
+        initialQuantity: 18,
+        remainingQuantity: 14,
+      },
+      {
+        sku: "SP-VET-REC",
+        batchNumber: "REC-2612",
+        expiryDate: in180Days,
+        importedPackages: 2,
+        conversionRate: 12,
+        initialQuantity: 24,
+        remainingQuantity: 24,
+      },
+      {
+        sku: "SP-SHP-OAT",
+        batchNumber: "OAT-2703",
+        expiryDate: in365Days,
+        importedPackages: 1,
+        conversionRate: 12,
+        initialQuantity: 12,
+        remainingQuantity: 12,
+      },
+      {
+        sku: "SP-EAR-EPI",
+        batchNumber: "EPI-2704",
+        expiryDate: in365Days,
+        importedPackages: 1,
+        conversionRate: 10,
+        initialQuantity: 10,
+        remainingQuantity: 10,
+      },
+      // Supplies
+      {
+        sku: "VT-KIM-1ML",
+        batchNumber: "KIM-2709",
+        expiryDate: in365Days,
+        importedPackages: 2,
+        conversionRate: 100,
+        initialQuantity: 200,
+        remainingQuantity: 180,
+      },
+      {
+        sku: "VT-CON-70",
+        batchNumber: "CON-2702",
+        expiryDate: in365Days,
+        importedPackages: 1,
+        conversionRate: 20,
+        initialQuantity: 20,
+        remainingQuantity: 15,
+      },
+    ];
+
+    for (const b of batchSeeds) {
+      const prod = productMap[b.sku];
+      if (!prod) continue;
+      const batch = await prisma.inventoryBatch.create({
+        data: {
+          productId: prod.id,
+          batchNumber: b.batchNumber,
+          expiryDate: b.expiryDate,
+          importedPackages: b.importedPackages,
+          conversionRate: b.conversionRate,
+          initialQuantity: b.initialQuantity,
+          remainingQuantity: b.remainingQuantity,
+          importNote: b.importNote ?? "Nhập kho ban đầu",
+          createdById: manager.id,
+        },
+      });
+      await prisma.stockTransaction.create({
+        data: {
+          productId: prod.id,
+          batchId: batch.id,
+          type: "IMPORT",
+          quantityChange: b.initialQuantity,
+          note: `Nhập ${b.importedPackages} đơn vị lớn (${b.initialQuantity} ${prod.retailUnit}) - Lô ${b.batchNumber}`,
+          createdById: manager.id,
+          createdByName: manager.fullName,
+        },
+      });
+    }
+
+    // 1 phiếu xuất kho nội bộ mẫu (Kim tiêm 1ml)
+    await prisma.internalUsageSlip.create({
+      data: {
+        slipCode: "XNB-2026-001",
+        productId: productMap["VT-KIM-1ML"].id,
+        quantity: 20,
+        department: "Phòng khám số 1",
+        reason: "Xuất kim tiêm 1ml dùng cho ca tiêm phòng trong tuần",
+        createdById: docNam.id,
+        createdByName: docNam.fullName,
+      },
+    });
+
+    // 1 phiếu xuất hủy mẫu
+    await prisma.disposalSlip.create({
+      data: {
+        slipCode: "XH-2026-001",
+        type: "DISPOSAL",
+        productId: productMap["TH-SURO-15"].id,
+        quantityChange: -2,
+        reason: "Vỡ 2 lọ trong quá trình vận chuyển kiểm kê kho",
+        createdById: manager.id,
+        createdByName: manager.fullName,
+      },
     });
   }
 
   // ==========================================
-  // 6. SỰ KIỆN & ƯU ĐÃI ĐANG CHẠY (BANNER ĐẾM NGƯỢC)
+  // 6. SỰ KIỆN & ƯU ĐÃI ĐANG CHẠY
   // ==========================================
-  const now = new Date();
   const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
   const in28Days = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000);
   const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
 
   await prisma.promotion.upsert({
     where: { code: "SPA20ANIMORA" },
-    update: {
-      startDate: threeDaysAgo,
-      endDate: in14Days,
-      isActive: true,
-      showOnLanding: true,
-    },
+    update: { startDate: threeDaysAgo, endDate: in14Days, isActive: true, showOnLanding: true },
     create: {
       code: "SPA20ANIMORA",
       title: "Tuần lễ Spa Thư giãn — Giảm ngay 20% mọi gói Tắm & Cắt tỉa",
@@ -618,18 +930,13 @@ async function main() {
 
   await prisma.promotion.upsert({
     where: { code: "KHAMTONGQUAT50K" },
-    update: {
-      startDate: threeDaysAgo,
-      endDate: in28Days,
-      isActive: true,
-      showOnLanding: true,
-    },
+    update: { startDate: threeDaysAgo, endDate: in28Days, isActive: true, showOnLanding: true },
     create: {
       code: "KHAMTONGQUAT50K",
       title: "Ưu đãi Tầm soát Sức khỏe Định kỳ — Giảm 50.000đ gói Khám & Xét nghiệm",
       subtitle: "Chủ động bảo vệ thú cưng trước thời điểm giao mùa",
       description:
-        "Giảm trực tiếp 50.000đ trên hóa đơn khi thực hiện Khám lâm sàng tổng quát kèm Siêu âm hoặc Xét nghiệm máu tổng quát. Được cộng dồn cùng ưu đãi thành viên tại quầy.",
+        "Giảm trực tiếp 50.000đ trên hóa đơn khi thực hiện Khám lâm sàng tổng quát kèm Siêu âm hoặc Xét nghiệm máu tổng quát.",
       discountType: "FIXED",
       discountValue: 50000,
       applicableScope: "MEDICAL",
@@ -641,7 +948,394 @@ async function main() {
     },
   });
 
-  console.log("✅ Đã nạp thành công toàn bộ dữ liệu mẫu ANIMORA!");
+  await prisma.promotion.upsert({
+    where: { code: "MEMBER10" },
+    update: { startDate: threeDaysAgo, endDate: in28Days, isActive: true },
+    create: {
+      code: "MEMBER10",
+      title: "Mã giảm thêm 10% tổng hóa đơn khách hàng thân thiết",
+      subtitle: "Có thể cộng dồn sau khuyến mãi dịch vụ/sự kiện",
+      description: "Áp dụng cộng dồn trên tổng tiền còn lại sau khi đã trừ ưu đãi sự kiện.",
+      discountType: "PERCENT",
+      discountValue: 10,
+      applicableScope: "ALL",
+      badgeText: "MÃ GIẢM 10%",
+      startDate: threeDaysAgo,
+      endDate: in28Days,
+      showOnLanding: false,
+      isActive: true,
+    },
+  });
+
+  // ==========================================
+  // 7. DỮ LIỆU VẬN HÀNH MẪU (BOOKING + S.O.A.P + POS INVOICE)
+  // ==========================================
+  const todayStr = getTodayStr();
+  const pastDateStr = getDateOffsetStr(-15);
+  const existingBookings = await prisma.booking.count();
+
+  if (existingBookings === 0) {
+    const srvKham = serviceMap["kham-lam-sang-tong-quat"];
+    const srvVacxin = serviceMap["tiem-phong-vac-xin-7-benh-cho"];
+    const srvTam = serviceMap["tam-ve-sinh-co-ban"];
+    const srvSieuAm = serviceMap["sieu-am-o-bung-thai-ky"];
+
+    // (A) Lịch hẹn quá giờ > 20 phút hôm nay (08:00, chưa check-in -> DÒNG MÀU ĐỎ trên màn hình Lễ tân!)
+    await prisma.booking.create({
+      data: {
+        bookingCode: "ANM-7102",
+        isGuest: false,
+        customerId: customer2.id,
+        doctorId: docQuocBao.id,
+        bookingDate: todayStr,
+        startTime: "08:00",
+        endTime: "08:30",
+        totalDurationMinutes: 30,
+        status: "CONFIRMED",
+        notes: "Bé Milo đi tiêm nhắc lại, khách báo có thể đến trễ",
+        pets: {
+          create: [
+            {
+              petId: petMilo.id,
+              services: {
+                create: [
+                  {
+                    serviceId: srvVacxin.id,
+                    serviceName: srvVacxin.name,
+                    serviceCategory: srvVacxin.category,
+                    price: srvVacxin.price,
+                    durationMinutes: srvVacxin.durationMinutes,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    // (B) Lịch hẹn Khách vãng lai (Guest) — để test ngay trang /tra-cuu với Mã ANM-8492 & SĐT 0909888777
+    await prisma.booking.create({
+      data: {
+        bookingCode: "ANM-8492",
+        isGuest: true,
+        guestName: "Phạm Quốc Hưng",
+        guestPhone: "0909888777",
+        guestEmail: "quochung.guest@gmail.com",
+        doctorId: docNam.id,
+        autoAssigned: true,
+        bookingDate: todayStr,
+        startTime: "16:30",
+        endTime: "17:00",
+        totalDurationMinutes: 30,
+        status: "CONFIRMED",
+        notes: "Bé Cà Phê bị hắt hơi nhẹ 2 hôm nay",
+        pets: {
+          create: [
+            {
+              guestPetName: "Cà Phê",
+              guestPetSpecies: "CAT",
+              guestPetBreed: "Mèo mướp ta",
+              guestPetNote: "Khoảng 1 tuổi, hơi nhát người lạ",
+              services: {
+                create: [
+                  {
+                    serviceId: srvKham.id,
+                    serviceName: srvKham.name,
+                    serviceCategory: srvKham.category,
+                    price: srvKham.price,
+                    durationMinutes: srvKham.durationMinutes,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    // (C) Lịch hẹn ĐA THÚ CƯNG của Khách thành viên Lê Thu Hà (Bơ + Mochi) hôm nay
+    await prisma.booking.create({
+      data: {
+        bookingCode: "ANM-8501",
+        isGuest: false,
+        customerId: customer.id,
+        doctorId: docNam.id,
+        bookingDate: todayStr,
+        startTime: "15:00",
+        endTime: "16:30",
+        totalDurationMinutes: 90,
+        status: "CONFIRMED",
+        notes: "Đặt khám cho Bơ và tắm vệ sinh cho Mochi trong cùng lượt",
+        pets: {
+          create: [
+            {
+              petId: petBo.id,
+              services: {
+                create: [
+                  {
+                    serviceId: srvKham.id,
+                    serviceName: srvKham.name,
+                    serviceCategory: srvKham.category,
+                    price: srvKham.price,
+                    durationMinutes: srvKham.durationMinutes,
+                  },
+                ],
+              },
+            },
+            {
+              petId: petMochi.id,
+              services: {
+                create: [
+                  {
+                    serviceId: srvTam.id,
+                    serviceName: srvTam.name,
+                    serviceCategory: srvTam.category,
+                    price: srvTam.price,
+                    durationMinutes: srvTam.durationMinutes,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    // (D) Ca đã CHECK-IN chờ BS. Lê Hoàng Nam bấm "Bắt đầu khám" ngay lập tức!
+    await prisma.booking.create({
+      data: {
+        bookingCode: "ANM-8455",
+        isGuest: false,
+        customerId: customer.id,
+        doctorId: docNam.id,
+        bookingDate: todayStr,
+        startTime: "14:00",
+        endTime: "14:30",
+        totalDurationMinutes: 30,
+        status: "CHECKED_IN",
+        notes: "Bé Bơ gãi tai phải nhiều từ tối qua, chủ nuôi đã đến quầy check-in",
+        pets: {
+          create: [
+            {
+              petId: petBo.id,
+              services: {
+                create: [
+                  {
+                    serviceId: srvKham.id,
+                    serviceName: srvKham.name,
+                    serviceCategory: srvKham.category,
+                    price: srvKham.price,
+                    durationMinutes: srvKham.durationMinutes,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    // (E) Ca khám quá khứ (15 ngày trước) ĐÃ THANH TOÁN & KHÓA CỨNG S.O.A.P -> Để hiển thị lịch sử khám của bé Bơ!
+    const pastBooking = await prisma.booking.create({
+      data: {
+        bookingCode: "ANM-6012",
+        isGuest: false,
+        customerId: customer.id,
+        doctorId: docNam.id,
+        bookingDate: pastDateStr,
+        startTime: "09:30",
+        endTime: "10:30",
+        totalDurationMinutes: 60,
+        status: "COMPLETED",
+        pets: {
+          create: [
+            {
+              petId: petBo.id,
+              services: {
+                create: [
+                  {
+                    serviceId: srvKham.id,
+                    serviceName: srvKham.name,
+                    serviceCategory: srvKham.category,
+                    price: srvKham.price,
+                    durationMinutes: srvKham.durationMinutes,
+                  },
+                  {
+                    serviceId: srvSieuAm.id,
+                    serviceName: srvSieuAm.name,
+                    serviceCategory: srvSieuAm.category,
+                    price: srvSieuAm.price,
+                    durationMinutes: srvSieuAm.durationMinutes,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const lockedRecord = await prisma.medicalRecord.create({
+      data: {
+        recordCode: "BA-2026-0001",
+        bookingId: pastBooking.id,
+        doctorId: docNam.id,
+        customerId: customer.id,
+        petId: petBo.id,
+        subjective: "Bé Bơ ăn hơi chậm trong 2 ngày, đi phân hơi mềm, không nôn ói.",
+        objective: "Niêm mạc hồng, bụng mềm không chướng hơi. Siêu âm ổ bụng gan thận bình thường, nhu động ruột hơi tăng nhẹ.",
+        weightKg: "11.4",
+        temperatureC: "38.6",
+        heartRate: "104",
+        respiratoryRate: "26",
+        assessment: "Rối loạn tiêu hóa nhẹ do thay đổi khẩu phần ăn.",
+        plan: "1. Men tiêu hóa Bio-Flora: 1 gói/lần x 2 lần/ngày trong 5 ngày.\n2. Chuyển sang thức ăn dễ tiêu, chia nhỏ bữa.\n3. Theo dõi phân trong 48h, tái khám nếu phân lỏng kéo dài.",
+        followUpDate: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000),
+        followUpNote: "Kiểm tra lại cân nặng và tiêm nhắc phòng dại định kỳ",
+        status: "LOCKED",
+        lockedAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    await prisma.invoice.create({
+      data: {
+        invoiceCode: "HD-2026-0001",
+        type: "CLINIC",
+        bookingId: pastBooking.id,
+        medicalRecordId: lockedRecord.id,
+        customerId: customer.id,
+        petSummary: "Bơ (Chó - Corgi Pembroke)",
+        doctorId: docNam.id,
+        cashierId: receptionist.id,
+        subtotal: 505000,
+        eventDiscountAmount: 50000,
+        couponDiscountAmount: 0,
+        totalAmount: 455000,
+        appliedEventPromoTitle: "Ưu đãi Tầm soát Sức khỏe Định kỳ",
+        paymentMethod: "VIETQR",
+        status: "PAID",
+        paidAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
+        items: {
+          create: [
+            {
+              itemType: "SERVICE",
+              serviceId: srvKham.id,
+              name: srvKham.name,
+              category: "MEDICAL",
+              unit: "Lần",
+              quantity: 1,
+              unitPrice: srvKham.price,
+              totalPrice: srvKham.price,
+              addedByRole: "DOCTOR",
+            },
+            {
+              itemType: "SERVICE",
+              serviceId: srvSieuAm.id,
+              name: srvSieuAm.name,
+              category: "MEDICAL",
+              unit: "Lần",
+              quantity: 1,
+              unitPrice: srvSieuAm.price,
+              totalPrice: srvSieuAm.price,
+              addedByRole: "DOCTOR",
+            },
+            {
+              itemType: "MEDICINE",
+              productId: productMap["TH-BIOF-5G"].id,
+              name: productMap["TH-BIOF-5G"].name,
+              category: "MEDICINE",
+              unit: "Gói",
+              quantity: 5,
+              unitPrice: productMap["TH-BIOF-5G"].price,
+              totalPrice: productMap["TH-BIOF-5G"].price * 5,
+              dosageInstruction: "Pha nước ấm uống 1 gói/lần, sáng & tối",
+              addedByRole: "DOCTOR",
+            },
+          ],
+        },
+      },
+    });
+
+    // (F) 1 PHIẾU HÓA ĐƠN CHỜ THANH TOÁN (SENT_TO_POS) từ Bác sĩ gửi ra quầy -> Để test POS ngay!
+    const pendingRecord = await prisma.medicalRecord.create({
+      data: {
+        recordCode: "BA-2026-0002",
+        doctorId: docMinhAnh.id,
+        customerId: customer.id,
+        petId: petMochi.id,
+        subjective: "Bé Mochi có vảy gàu nhẹ vùng tai và cổ, gãi tai nhiều 3 ngày gần đây.",
+        objective: "Soi tai có dịch ráy nâu sẫm, niêm mạc ống tai hơi đỏ nhẹ. Không sốt, ăn uống bình thường.",
+        weightKg: "3.8",
+        temperatureC: "38.4",
+        heartRate: "152",
+        respiratoryRate: "30",
+        assessment: "Viêm tai ngoài nhẹ do nấm men Malassezia.",
+        plan: "1. Nhỏ tai Surolan: 3 giọt/tai, ngày 2 lần trong 7 ngày.\n2. Uống kháng sinh Amoxicillin 250mg (1/2 viên/lần, ngày 2 lần trong 5 ngày).\n3. Tái khám soi tai sau 7 ngày.",
+        followUpDate: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+        followUpNote: "Soi kiểm tra lại ống tai sau liệu trình 7 ngày",
+        status: "SENT_TO_POS",
+      },
+    });
+
+    await prisma.invoice.create({
+      data: {
+        invoiceCode: "HD-2026-0002",
+        type: "CLINIC",
+        medicalRecordId: pendingRecord.id,
+        customerId: customer.id,
+        petSummary: "Mochi (Mèo - Mèo Anh Lông Ngắn)",
+        doctorId: docMinhAnh.id,
+        subtotal: 150000 + 245000 + 18000 * 5,
+        eventDiscountAmount: 0,
+        couponDiscountAmount: 0,
+        totalAmount: 150000 + 245000 + 18000 * 5,
+        status: "PENDING",
+        notes: "Bác sĩ Phạm Minh Anh gửi quầy thanh toán (có kê thuốc từ kho FEFO)",
+        items: {
+          create: [
+            {
+              itemType: "SERVICE",
+              serviceId: srvKham.id,
+              name: srvKham.name,
+              category: "MEDICAL",
+              unit: "Lần",
+              quantity: 1,
+              unitPrice: srvKham.price,
+              totalPrice: srvKham.price,
+              addedByRole: "DOCTOR",
+            },
+            {
+              itemType: "MEDICINE",
+              productId: productMap["TH-SURO-15"].id,
+              name: productMap["TH-SURO-15"].name,
+              category: "MEDICINE",
+              unit: "Lọ",
+              quantity: 1,
+              unitPrice: productMap["TH-SURO-15"].price,
+              totalPrice: productMap["TH-SURO-15"].price,
+              dosageInstruction: "Nhỏ 3 giọt/tai, sáng & tối trong 7 ngày",
+              addedByRole: "DOCTOR",
+            },
+            {
+              itemType: "MEDICINE",
+              productId: productMap["TH-AMOX-250"].id,
+              name: productMap["TH-AMOX-250"].name,
+              category: "MEDICINE",
+              unit: "Viên",
+              quantity: 5,
+              unitPrice: productMap["TH-AMOX-250"].price,
+              totalPrice: productMap["TH-AMOX-250"].price * 5,
+              dosageInstruction: "1/2 viên/lần, ngày 2 lần sau ăn trong 5 ngày",
+              addedByRole: "DOCTOR",
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  console.log("✅ Đã nạp thành công toàn bộ dữ liệu mẫu ANIMORA (GD1 + GD2 + GD3)!");
 }
 
 main()

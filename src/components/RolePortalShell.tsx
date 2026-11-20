@@ -99,7 +99,7 @@ export function RolePortalShell({
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Phân quyền xác thực thành công — Giai đoạn 1
+              Hệ thống vận hành ANIMORA — Đã xác thực phân quyền
             </div>
             <h1 className="mt-3 text-3xl font-extrabold text-[#132A2E]">
               {pageTitle}

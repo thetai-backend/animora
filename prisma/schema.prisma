@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client-animora"
 }
 
 datasource db {
@@ -24,7 +25,7 @@ model User {
   isActive        Boolean  @default(true)
   emailVerified   Boolean  @default(false)
 
-  // Thông tin chuyên môn (dành cho Bác sĩ hiển thị trên Trang Quảng cáo & Điều phối)
+  // Thông tin chuyên môn (dành cho Bác sĩ)
   avatarUrl       String?
   title           String?
   specialty       String?
@@ -33,7 +34,21 @@ model User {
   // AVAILABLE | IN_EXAM | OFF_DUTY (Rule 5)
   workStatus      String   @default("AVAILABLE")
 
-  pets            Pet[]
+  pets                   Pet[]
+  workSchedules          WorkSchedule[]
+  doctorLeaves           DoctorLeave[]
+  customerBookings       Booking[]               @relation("CustomerBookings")
+  doctorBookings         Booking[]               @relation("DoctorBookings")
+  doctorMedicalRecords   MedicalRecord[]         @relation("DoctorMedicalRecords")
+  customerMedicalRecords MedicalRecord[]         @relation("CustomerMedicalRecords")
+  medicalAddendums       MedicalRecordAddendum[]
+  customerInvoices       Invoice[]               @relation("CustomerInvoices")
+  doctorInvoices         Invoice[]               @relation("DoctorInvoices")
+  cashierInvoices        Invoice[]               @relation("CashierInvoices")
+  invoiceAuditLogs       InvoiceAuditLog[]
+  internalUsageSlips     InternalUsageSlip[]
+  disposalSlips          DisposalSlip[]
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
@@ -57,81 +72,89 @@ model OtpCode {
 // 3. HỒ SƠ THÚ CƯNG (CHỈ DÀNH CHO KHÁCH CÓ TÀI KHOẢN)
 // ==========================================
 model Pet {
-  id                 String    @id @default(cuid())
+  id                 String          @id @default(cuid())
   ownerId            String
-  owner              User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner              User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   name               String
-  species            String    // DOG | CAT | OTHER
+  species            String          // DOG | CAT | OTHER
   breed              String?
   birthDate          DateTime?
-  gender             String?   // MALE | FEMALE
-  isNeutered         Boolean   @default(false)
+  gender             String?         // MALE | FEMALE
+  isNeutered         Boolean         @default(false)
   coatDescription    String?
   microchipCode      String?
   allergies          String?
   vaccinationHistory String?
   dewormingHistory   String?
   // ALIVE | DECEASED (Rule 12: Đã mất sẽ tự dừng mọi email nhắc lịch)
-  status             String    @default("ALIVE")
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  status             String          @default("ALIVE")
+  bookingPets        BookingPet[]
+  medicalRecords     MedicalRecord[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 }
 
 // ==========================================
 // 4. DỊCH VỤ & BẢNG GIÁ CỐ ĐỊNH (Y TẾ / SPA)
 // ==========================================
 model Service {
-  id               String   @id @default(cuid())
-  slug             String   @unique
-  name             String
+  id                 String              @id @default(cuid())
+  slug               String              @unique
+  name               String
   // MEDICAL | SPA
-  category         String
+  category           String
   // Giá cố định VNĐ (Rule 7: không chia theo cân nặng)
-  price            Int
-  // Thời lượng ước tính (phút) để khóa slot 30p ở Giai đoạn 2
-  durationMinutes  Int      @default(30)
-  shortDescription String
-  // Các bước quy trình thực hiện (ngăn cách bằng dấu xuống dòng)
-  processSteps     String
-  isActive         Boolean  @default(true)
-  sortOrder        Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  price              Int
+  // Thời lượng ước tính (phút) để khóa slot 30p liên tiếp
+  durationMinutes    Int                 @default(30)
+  shortDescription   String
+  processSteps       String
+  isActive           Boolean             @default(true)
+  sortOrder          Int                 @default(0)
+  bookingPetServices BookingPetService[]
+  invoiceItems       InvoiceItem[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 // ==========================================
 // 5. SẢN PHẨM TẠI SHOP & KHO HỢP NHẤT
 // ==========================================
 model Product {
-  id                  String   @id @default(cuid())
-  slug                String   @unique
-  sku                 String   @unique
+  id                  String              @id @default(cuid())
+  slug                String              @unique
+  sku                 String              @unique
   name                String
   brand               String
   // SHOP | MEDICINE | SUPPLY (Rule 10)
-  group               String   @default("SHOP")
-  // Thức ăn dinh dưỡng | Sữa tắm & Chăm sóc | Thực phẩm bổ sung | Phụ kiện
+  group               String              @default("SHOP")
   category            String
   // DOG | CAT | BOTH
   targetSpecies       String
   price               Int
   // Quy đổi đơn vị nhập -> bán lẻ (Rule 10)
-  importUnit          String   @default("Thùng")
-  retailUnit          String   @default("Gói")
-  conversionRate      Int      @default(1)
-  stockQuantity       Int      @default(0)
+  importUnit          String              @default("Thùng")
+  retailUnit          String              @default("Gói")
+  conversionRate      Int                 @default(1)
+  stockQuantity       Int                 @default(0)
   imageUrl            String
   shortDescription    String
-  // Mô tả chuyên sâu cho Trang Quảng cáo (Rule 2: chỉ tham khảo mua tại quầy)
   ingredients         String
   benefits            String
   suitableFor         String
   usageInstructions   String
   storageInstructions String
-  isFeaturedOnWeb     Boolean  @default(true)
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  isFeaturedOnWeb     Boolean             @default(true)
+  isActive            Boolean             @default(true)
+
+  batches             InventoryBatch[]
+  stockTransactions   StockTransaction[]
+  internalUsageSlips  InternalUsageSlip[]
+  disposalSlips       DisposalSlip[]
+  invoiceItems        InvoiceItem[]
+
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 }
 
 // ==========================================
@@ -183,4 +206,336 @@ model ClinicSettings {
   bankAccountNumber   String?
   bankAccountName     String?
   updatedAt           DateTime @updatedAt
+}
+
+// ==========================================
+// 8. LỊCH TRỰC CỐ ĐỊNH HÀNG TUẦN & NGHỈ PHÉP BÁC SĨ
+// ==========================================
+model WorkSchedule {
+  id             String   @id @default(cuid())
+  doctorId       String
+  doctor         User     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  // 0 = Chủ nhật, 1 = Thứ 2 ... 6 = Thứ 7
+  dayOfWeek      Int
+  // Ca sáng 07:00 - 13:30
+  morningShift   Boolean  @default(true)
+  // Ca chiều 13:30 - 20:00
+  afternoonShift Boolean  @default(true)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([doctorId, dayOfWeek])
+}
+
+model DoctorLeave {
+  id                     String   @id @default(cuid())
+  doctorId               String
+  doctor                 User     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  // YYYY-MM-DD
+  leaveDate              String
+  // MORNING | AFTERNOON | FULL_DAY
+  shift                  String   @default("FULL_DAY")
+  isEmergency            Boolean  @default(false)
+  reason                 String
+  resolvedByReceptionist Boolean  @default(false)
+  createdAt              DateTime @default(now())
+
+  @@index([doctorId, leaveDate])
+}
+
+// ==========================================
+// 9. ĐẶT LỊCH HẸN & CHI TIẾT THÚ CƯNG (MEMBER + GUEST)
+// ==========================================
+model Booking {
+  id                   String          @id @default(cuid())
+  bookingCode          String          @unique
+  // Rule 3: Khách vãng lai KHÔNG lưu vào bảng User/Pet
+  isGuest              Boolean         @default(false)
+  customerId           String?
+  customer             User?           @relation("CustomerBookings", fields: [customerId], references: [id], onDelete: SetNull)
+  guestName            String?
+  guestPhone           String?
+  guestEmail           String?
+
+  doctorId             String?
+  doctor               User?           @relation("DoctorBookings", fields: [doctorId], references: [id], onDelete: SetNull)
+  autoAssigned         Boolean         @default(false)
+
+  // YYYY-MM-DD & HH:mm
+  bookingDate          String
+  startTime            String
+  endTime              String
+  totalDurationMinutes Int             @default(30)
+
+  // CONFIRMED | CHECKED_IN | IN_PROGRESS | COMPLETED | CANCELLED
+  status               String          @default("CONFIRMED")
+  isWalkIn             Boolean         @default(false)
+  isEmergency          Boolean         @default(false)
+  notes                String?
+  cancelledAt          DateTime?
+  cancelReason         String?
+
+  pets                 BookingPet[]
+  medicalRecords       MedicalRecord[]
+  invoices             Invoice[]
+
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  @@index([bookingDate, doctorId])
+  @@index([bookingCode])
+}
+
+model BookingPet {
+  id              String              @id @default(cuid())
+  bookingId       String
+  booking         Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  petId           String?
+  pet             Pet?                @relation(fields: [petId], references: [id], onDelete: SetNull)
+  // Dành cho khách vãng lai (đính kèm tạm trên phiếu đặt lịch)
+  guestPetName    String?
+  guestPetSpecies String?             // DOG | CAT | OTHER
+  guestPetBreed   String?
+  guestPetNote    String?
+
+  services        BookingPetService[]
+  medicalRecords  MedicalRecord[]
+}
+
+model BookingPetService {
+  id              String     @id @default(cuid())
+  bookingPetId    String
+  bookingPet      BookingPet @relation(fields: [bookingPetId], references: [id], onDelete: Cascade)
+  serviceId       String
+  service         Service    @relation(fields: [serviceId], references: [id])
+  serviceName     String
+  serviceCategory String
+  price           Int
+  durationMinutes Int
+}
+
+// ==========================================
+// 10. CA KHÁM & BỆNH ÁN S.O.A.P THUẦN VĂN BẢN
+// ==========================================
+model MedicalRecord {
+  id              String                  @id @default(cuid())
+  recordCode      String                  @unique
+  bookingId       String?
+  booking         Booking?                @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  bookingPetId    String?
+  bookingPet      BookingPet?             @relation(fields: [bookingPetId], references: [id], onDelete: SetNull)
+
+  doctorId        String
+  doctor          User                    @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
+  customerId      String?
+  customer        User?                   @relation("CustomerMedicalRecords", fields: [customerId], references: [id], onDelete: SetNull)
+  petId           String?
+  pet             Pet?                    @relation(fields: [petId], references: [id], onDelete: SetNull)
+
+  // Lưu snapshot khách vãng lai (Rule 3: vẫn lưu bệnh án vào Hồ sơ ca khám)
+  guestOwnerName  String?
+  guestOwnerPhone String?
+  guestPetName    String?
+  guestPetSpecies String?
+  guestPetBreed   String?
+
+  // S.O.A.P thuần văn bản (Rule 6: không upload ảnh/file)
+  subjective      String                  @default("")
+  objective       String                  @default("")
+  weightKg        String?
+  temperatureC    String?
+  heartRate       String?
+  respiratoryRate String?
+  assessment      String                  @default("")
+  plan            String                  @default("")
+  followUpDate    DateTime?
+  followUpNote    String?
+
+  // IN_PROGRESS | SENT_TO_POS | LOCKED
+  status          String                  @default("IN_PROGRESS")
+  lockedAt        DateTime?
+
+  addendums       MedicalRecordAddendum[]
+  invoice         Invoice?
+
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([doctorId, createdAt])
+  @@index([petId])
+}
+
+model MedicalRecordAddendum {
+  id              String        @id @default(cuid())
+  medicalRecordId String
+  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  authorId        String
+  author          User          @relation(fields: [authorId], references: [id])
+  authorName      String
+  content         String
+  createdAt       DateTime      @default(now())
+}
+
+// ==========================================
+// 11. KHO THÔNG MINH ĐA LÔ, QUY ĐỔI ĐƠN VỊ & PHIẾU XUẤT
+// ==========================================
+model InventoryBatch {
+  id                 String              @id @default(cuid())
+  productId          String
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchNumber        String
+  expiryDate         DateTime
+  importedPackages   Int
+  conversionRate     Int
+  initialQuantity    Int                 // Đơn vị nhỏ nhất (viên/ml/gói/cái)
+  remainingQuantity  Int                 // Đơn vị nhỏ nhất còn lại
+  importNote         String?
+  createdById        String?
+  createdAt          DateTime            @default(now())
+
+  transactions       StockTransaction[]
+  internalUsageSlips InternalUsageSlip[]
+  disposalSlips      DisposalSlip[]
+
+  @@index([productId, expiryDate])
+}
+
+model StockTransaction {
+  id             String          @id @default(cuid())
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchId        String?
+  batch          InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  // IMPORT | SALE_DEDUCT | INTERNAL_USE | DISPOSAL | ADJUSTMENT | RETURN
+  type           String
+  quantityChange Int
+  referenceId    String?
+  note           String?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime        @default(now())
+
+  @@index([productId, createdAt])
+}
+
+model InternalUsageSlip {
+  id            String          @id @default(cuid())
+  slipCode      String          @unique
+  productId     String
+  product       Product         @relation(fields: [productId], references: [id])
+  batchId       String?
+  batch         InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  quantity      Int
+  department    String          @default("Phòng khám")
+  reason        String
+  createdById   String
+  createdBy     User            @relation(fields: [createdById], references: [id])
+  createdByName String
+  createdAt     DateTime        @default(now())
+}
+
+model DisposalSlip {
+  id             String          @id @default(cuid())
+  slipCode       String          @unique
+  // DISPOSAL | ADJUSTMENT
+  type           String          @default("DISPOSAL")
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id])
+  batchId        String?
+  batch          InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  quantityChange Int
+  reason         String
+  createdById    String
+  createdBy      User            @relation(fields: [createdById], references: [id])
+  createdByName  String
+  createdAt      DateTime        @default(now())
+}
+
+// ==========================================
+// 12. HÓA ĐƠN POS, CHI TIẾT & LỊCH SỬ CHỈNH SỬA (AUDIT LOG)
+// ==========================================
+model Invoice {
+  id                     String            @id @default(cuid())
+  invoiceCode            String            @unique
+  // CLINIC | RETAIL
+  type                   String            @default("CLINIC")
+  bookingId              String?
+  booking                Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  medicalRecordId        String?           @unique
+  medicalRecord          MedicalRecord?    @relation(fields: [medicalRecordId], references: [id], onDelete: SetNull)
+
+  customerId             String?
+  customer               User?             @relation("CustomerInvoices", fields: [customerId], references: [id], onDelete: SetNull)
+  guestName              String?
+  guestPhone             String?
+  petSummary             String?
+
+  doctorId               String?
+  doctor                 User?             @relation("DoctorInvoices", fields: [doctorId], references: [id], onDelete: SetNull)
+  cashierId              String?
+  cashier                User?             @relation("CashierInvoices", fields: [cashierId], references: [id], onDelete: SetNull)
+
+  subtotal               Int               @default(0)
+  eventDiscountAmount    Int               @default(0)
+  couponDiscountAmount   Int               @default(0)
+  totalAmount            Int               @default(0)
+
+  appliedEventPromoId    String?
+  appliedEventPromoTitle String?
+  appliedCouponCode      String?
+  appliedCouponTitle     String?
+
+  // CASH | VIETQR (Rule 9: Chỉ chọn 1 trong 2)
+  paymentMethod          String?
+  cashReceived           Int?
+  cashChange             Int?
+
+  // PENDING | PAID | CANCELLED
+  status                 String            @default("PENDING")
+  paidAt                 DateTime?
+  cancelledAt            DateTime?
+  cancelReason           String?
+  notes                  String?
+
+  items                  InvoiceItem[]
+  auditLogs              InvoiceAuditLog[]
+
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model InvoiceItem {
+  id                String   @id @default(cuid())
+  invoiceId         String
+  invoice           Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  // SERVICE | MEDICINE | SHOP_PRODUCT
+  itemType          String
+  serviceId         String?
+  service           Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  productId         String?
+  product           Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  name              String
+  // MEDICAL | SPA | SHOP | MEDICINE
+  category          String
+  unit              String   @default("Lần")
+  quantity          Int      @default(1)
+  unitPrice         Int
+  totalPrice        Int
+  dosageInstruction String?
+  // DOCTOR | RECEPTIONIST
+  addedByRole       String   @default("DOCTOR")
+}
+
+model InvoiceAuditLog {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id])
+  actorName String
+  action    String
+  itemName  String
+  detail    String
+  createdAt DateTime @default(now())
 }
