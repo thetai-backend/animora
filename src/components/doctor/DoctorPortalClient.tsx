@@ -16,7 +16,15 @@ import {
   PackageMinus,
   UserPlus,
 } from "lucide-react";
-import { formatDateVn, formatGender, formatSpecies, formatVnd, formatWorkStatus } from "@/lib/format";
+import {
+  calculatePetAge,
+  formatDateVn,
+  formatGender,
+  formatShift,
+  formatSpecies,
+  formatVnd,
+  formatWorkStatus,
+} from "@/lib/format";
 
 interface DoctorSelf {
   id: string;
@@ -153,6 +161,16 @@ interface LeaveItem {
   resolvedByReceptionist: boolean;
 }
 
+interface InternalSlipItem {
+  id: string;
+  slipCode: string;
+  quantity: number;
+  department: string;
+  reason: string;
+  createdAt: string;
+  product: { name: string; retailUnit: string };
+}
+
 interface PosDraftItem {
   key: string;
   itemType: "SERVICE" | "MEDICINE";
@@ -175,10 +193,12 @@ function getTodayStr(): string {
 
 export function DoctorPortalClient() {
   const [tab, setTab] = useState<"QUEUE" | "SOAP" | "LEAVE">("QUEUE");
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [doctor, setDoctor] = useState<DoctorSelf | null>(null);
   const [queueBookings, setQueueBookings] = useState<QueueBooking[]>([]);
   const [records, setRecords] = useState<MedicalRecordSummary[]>([]);
   const [leaves, setLeaves] = useState<LeaveItem[]>([]);
+  const [internalSlips, setInternalSlips] = useState<InternalSlipItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
@@ -233,14 +253,17 @@ export function DoctorPortalClient() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  const loadWorkspace = async () => {
-    const res = await fetch("/api/doctor/workspace");
+  const loadWorkspace = async (targetDate = selectedDate) => {
+    const res = await fetch(
+      `/api/doctor/workspace?date=${encodeURIComponent(targetDate)}`
+    );
     if (!res.ok) return;
     const data = await res.json();
     setDoctor(data.doctor);
     setQueueBookings(data.queueBookings || []);
     setRecords(data.medicalRecords || []);
     setLeaves(data.leaves || []);
+    setInternalSlips(data.internalSlips || []);
     setServices(data.services || []);
     setProducts(data.products || []);
 
@@ -254,9 +277,9 @@ export function DoctorPortalClient() {
   };
 
   useEffect(() => {
-    loadWorkspace();
+    loadWorkspace(selectedDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedDate]);
 
   const handleChangeStatus = async (workStatus: "AVAILABLE" | "IN_EXAM" | "OFF_DUTY") => {
     const res = await fetch("/api/doctor/status", {
@@ -294,17 +317,23 @@ export function DoctorPortalClient() {
     // Nạp sẵn danh sách dịch vụ/thuốc từ hóa đơn cũ hoặc dịch vụ đã đặt
     if (rec.invoice?.items?.length) {
       setPosItems(
-        rec.invoice.items.map((it, idx) => ({
-          key: `inv-${idx}`,
-          itemType: it.itemType === "SERVICE" ? "SERVICE" : "MEDICINE",
-          serviceId: it.serviceId || undefined,
-          productId: it.productId || undefined,
-          name: it.name,
-          unit: it.itemType === "SERVICE" ? "Lần" : "ĐV",
-          unitPrice: it.unitPrice,
-          quantity: it.quantity,
-          dosageInstruction: it.dosageInstruction || "",
-        }))
+        rec.invoice.items.map((it, idx) => {
+          const prod = it.productId
+            ? products.find((p) => p.id === it.productId)
+            : undefined;
+          return {
+            key: `inv-${idx}`,
+            itemType: it.itemType === "SERVICE" ? "SERVICE" : "MEDICINE",
+            serviceId: it.serviceId || undefined,
+            productId: it.productId || undefined,
+            name: it.name,
+            unit: prod?.retailUnit || (it.itemType === "SERVICE" ? "Lần" : "ĐV"),
+            unitPrice: it.unitPrice,
+            quantity: it.quantity,
+            stockQuantity: prod?.stockQuantity,
+            dosageInstruction: it.dosageInstruction || "",
+          };
+        })
       );
     } else if (rec.bookingPet?.services?.length) {
       setPosItems(
@@ -503,6 +532,17 @@ export function DoctorPortalClient() {
 
   const medicinesAndShared = products.filter((p) => p.group === "MEDICINE" || p.group === "SHOP");
   const supplies = products.filter((p) => p.group === "SUPPLY");
+  const isLocked = Boolean(
+    activeRecord &&
+      (activeRecord.status === "LOCKED" || activeRecord.invoice?.status === "PAID")
+  );
+  const selectedMedicineObj = medicinesAndShared.find((p) => p.id === addMedicineId);
+  const lowOrZeroStockDrafts = posItems.filter((it) => {
+    if (it.itemType !== "MEDICINE" || !it.productId) return false;
+    const prod = products.find((p) => p.id === it.productId);
+    const stock = prod ? prod.stockQuantity : it.stockQuantity;
+    return stock !== undefined && (stock <= 0 || it.quantity > stock);
+  });
 
   return (
     <div className="space-y-6">
@@ -702,13 +742,26 @@ export function DoctorPortalClient() {
       {tab === "QUEUE" && (
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-7 rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm">
-            <h2 className="text-lg font-extrabold text-[#132A2E]">
-              Hàng chờ khám hôm nay (từ Lễ tân đẩy vào)
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-extrabold text-[#132A2E]">
+                  Lịch khám cá nhân & Hàng chờ ({selectedDate})
+                </h2>
+                <p className="text-xs text-[#476268]">
+                  Các ca đã Check-in từ Lễ tân sẽ nổi bật màu xanh để bác sĩ bấm Bắt đầu khám.
+                </p>
+              </div>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-bold"
+              />
+            </div>
             <div className="mt-4 space-y-3">
               {queueBookings.length === 0 && (
                 <p className="text-sm text-[#476268]">
-                  Chưa có ca nào trong hàng chờ hôm nay.
+                  Chưa có lịch hẹn hoặc ca chờ nào trong ngày {selectedDate}.
                 </p>
               )}
               {queueBookings.map((b) => (
@@ -730,10 +783,10 @@ export function DoctorPortalClient() {
                       • <strong>{b.startTime}–{b.endTime}</strong>{" "}
                       <span className="ml-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-bold">
                         {b.status === "CHECKED_IN"
-                          ? "Khách đã đến quầy"
+                          ? "Đã Check-in (Trong hàng chờ)"
                           : b.status === "IN_PROGRESS"
                           ? "Đang khám"
-                          : "Chờ đến"}
+                          : "Đã đặt lịch (Chờ đến)"}
                       </span>
                       {b.isEmergency && (
                         <span className="ml-1 rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
@@ -750,29 +803,56 @@ export function DoctorPortalClient() {
                     {b.notes ? ` • Ghi chú: ${b.notes}` : ""}
                   </p>
                   <div className="mt-3 space-y-2">
-                    {b.pets.map((bp) => (
-                      <div
-                        key={bp.id}
-                        className="flex items-center justify-between rounded-xl bg-white px-3.5 py-2.5 text-xs border border-[#132A2E]/8"
-                      >
-                        <div>
-                          <strong className="text-[#132A2E]">
-                            🐾 {bp.pet ? bp.pet.name : bp.guestPetName} (
-                            {formatSpecies(bp.pet ? bp.pet.species : bp.guestPetSpecies || "DOG")})
-                          </strong>
-                          <span className="ml-2 text-[#476268]">
-                            {bp.services.map((s) => s.serviceName).join(", ")}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => handleStartExamFromBooking(b.id, bp.id)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-3 py-1.5 font-bold text-white hover:bg-[#0B5D56]"
+                    {b.pets.map((bp) => {
+                      const petRec = b.medicalRecords?.find(
+                        (mr) => mr.bookingPetId === bp.id
+                      );
+                      return (
+                        <div
+                          key={bp.id}
+                          className="flex items-center justify-between rounded-xl border border-[#132A2E]/8 bg-white px-3.5 py-2.5 text-xs"
                         >
-                          <Play className="h-3.5 w-3.5" />
-                          Bắt đầu khám
-                        </button>
-                      </div>
-                    ))}
+                          <div>
+                            <strong className="text-[#132A2E]">
+                              🐾 {bp.pet ? bp.pet.name : bp.guestPetName} (
+                              {formatSpecies(
+                                bp.pet ? bp.pet.species : bp.guestPetSpecies || "DOG"
+                              )}
+                              )
+                            </strong>
+                            <span className="ml-2 text-[#476268]">
+                              {bp.services.map((s) => s.serviceName).join(", ")}
+                            </span>
+                          </div>
+                          {petRec ? (
+                            <button
+                              onClick={() => openMedicalRecord(petRec.id)}
+                              className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 font-bold ${
+                                petRec.status === "SENT_TO_POS" ||
+                                petRec.status === "LOCKED"
+                                  ? "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                  : "bg-[#F97316] text-white hover:bg-[#EA580C]"
+                              }`}
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              {petRec.status === "LOCKED"
+                                ? "Đã khóa (Xem)"
+                                : petRec.status === "SENT_TO_POS"
+                                ? "Đã gửi POS"
+                                : "Tiếp tục khám"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleStartExamFromBooking(b.id, bp.id)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-3 py-1.5 font-bold text-white hover:bg-[#0B5D56]"
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                              Bắt đầu khám
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -862,7 +942,18 @@ export function DoctorPortalClient() {
                       {activeRecord.pet.isNeutered ? "Đã triệt sản" : "Chưa triệt sản"}
                     </p>
                     <p>
-                      <strong>Ngày sinh:</strong> {formatDateVn(activeRecord.pet.birthDate)}
+                      <strong>Ngày sinh / Tuổi:</strong> {formatDateVn(activeRecord.pet.birthDate)}
+                      {calculatePetAge(activeRecord.pet.birthDate)
+                        ? ` (${calculatePetAge(activeRecord.pet.birthDate)})`
+                        : ""}
+                    </p>
+                    <p>
+                      <strong>Màu lông / Đặc điểm:</strong>{" "}
+                      {activeRecord.pet.coatDescription || "—"}
+                    </p>
+                    <p>
+                      <strong>Số Microchip:</strong>{" "}
+                      <span className="font-mono">{activeRecord.pet.microchipCode || "—"}</span>
                     </p>
                     <p className="text-rose-700">
                       <strong>⚠ Tiền sử dị ứng:</strong>{" "}
@@ -877,8 +968,18 @@ export function DoctorPortalClient() {
                     </p>
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-xs text-amber-900">
-                    Ca khám Khách vãng lai (chỉ lưu bệnh án vào danh mục Hồ sơ ca khám, không lưu vào sổ Khách hàng cố định).
+                  <div className="mt-4 space-y-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950">
+                    <span className="inline-block rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-extrabold text-white">
+                      Khách vãng lai - Không lưu sổ hồ sơ
+                    </span>
+                    <p>
+                      <strong>Thú cưng:</strong> {activeRecord.guestPetName} (
+                      {formatSpecies(activeRecord.guestPetSpecies || "DOG")}
+                      {activeRecord.guestPetBreed ? ` • ${activeRecord.guestPetBreed}` : ""})
+                    </p>
+                    <p>
+                      Nội dung bệnh án S.O.A.P lượt này vẫn được lưu đầy đủ trong mục Hồ sơ ca khám để Quản lý tra cứu.
+                    </p>
                   </div>
                 )}
               </div>
@@ -920,10 +1021,10 @@ export function DoctorPortalClient() {
                       Chuẩn thuần văn bản thú y (không tải ảnh/file)
                     </p>
                   </div>
-                  {activeRecord.status === "LOCKED" ? (
+                  {isLocked ? (
                     <span className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-4 py-2 text-xs font-extrabold text-white">
                       <Lock className="h-4 w-4" />
-                      ĐÃ KHÓA CỨNG (Đã thanh toán)
+                      ĐÃ KHÓA CỨNG CHỈ ĐỌC (Đã thanh toán)
                     </span>
                   ) : (
                     <button
@@ -945,12 +1046,16 @@ export function DoctorPortalClient() {
                     </label>
                     <textarea
                       rows={2}
-                      disabled={activeRecord.status === "LOCKED"}
+                      readOnly={isLocked}
                       value={soapForm.subjective}
                       onChange={(e) =>
-                        setSoapForm({ ...soapForm, subjective: e.target.value })
+                        !isLocked && setSoapForm({ ...soapForm, subjective: e.target.value })
                       }
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-4 py-2.5 text-sm disabled:opacity-70"
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm ${
+                        isLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                          : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                      }`}
                     />
                   </div>
 
@@ -960,51 +1065,73 @@ export function DoctorPortalClient() {
                     </label>
                     <div className="mb-2 grid grid-cols-4 gap-3">
                       <input
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         placeholder="Cân nặng (kg)"
                         value={soapForm.weightKg}
                         onChange={(e) =>
-                          setSoapForm({ ...soapForm, weightKg: e.target.value })
+                          !isLocked && setSoapForm({ ...soapForm, weightKg: e.target.value })
                         }
-                        className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-bold"
+                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                          isLocked
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                       <input
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         placeholder="Nhiệt độ (°C)"
                         value={soapForm.temperatureC}
                         onChange={(e) =>
+                          !isLocked &&
                           setSoapForm({ ...soapForm, temperatureC: e.target.value })
                         }
-                        className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-bold"
+                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                          isLocked
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                       <input
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         placeholder="Nhịp tim (lần/ph)"
                         value={soapForm.heartRate}
                         onChange={(e) =>
-                          setSoapForm({ ...soapForm, heartRate: e.target.value })
+                          !isLocked && setSoapForm({ ...soapForm, heartRate: e.target.value })
                         }
-                        className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-bold"
+                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                          isLocked
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                       <input
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         placeholder="Nhịp thở (lần/ph)"
                         value={soapForm.respiratoryRate}
                         onChange={(e) =>
+                          !isLocked &&
                           setSoapForm({ ...soapForm, respiratoryRate: e.target.value })
                         }
-                        className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-bold"
+                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                          isLocked
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                     </div>
                     <textarea
                       rows={2}
-                      disabled={activeRecord.status === "LOCKED"}
+                      readOnly={isLocked}
                       value={soapForm.objective}
                       onChange={(e) =>
-                        setSoapForm({ ...soapForm, objective: e.target.value })
+                        !isLocked && setSoapForm({ ...soapForm, objective: e.target.value })
                       }
                       placeholder="Ghi nhận niêm mạc, tim phổi, ổ bụng, da lông, tai..."
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-4 py-2.5 text-sm disabled:opacity-70"
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm ${
+                        isLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                          : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                      }`}
                     />
                   </div>
 
@@ -1014,12 +1141,16 @@ export function DoctorPortalClient() {
                     </label>
                     <textarea
                       rows={2}
-                      disabled={activeRecord.status === "LOCKED"}
+                      readOnly={isLocked}
                       value={soapForm.assessment}
                       onChange={(e) =>
-                        setSoapForm({ ...soapForm, assessment: e.target.value })
+                        !isLocked && setSoapForm({ ...soapForm, assessment: e.target.value })
                       }
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-4 py-2.5 text-sm disabled:opacity-70"
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm ${
+                        isLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                          : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                      }`}
                     />
                   </div>
 
@@ -1029,10 +1160,16 @@ export function DoctorPortalClient() {
                     </label>
                     <textarea
                       rows={3}
-                      disabled={activeRecord.status === "LOCKED"}
+                      readOnly={isLocked}
                       value={soapForm.plan}
-                      onChange={(e) => setSoapForm({ ...soapForm, plan: e.target.value })}
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-4 py-2.5 text-sm disabled:opacity-70"
+                      onChange={(e) =>
+                        !isLocked && setSoapForm({ ...soapForm, plan: e.target.value })
+                      }
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm ${
+                        isLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                          : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                      }`}
                     />
                   </div>
 
@@ -1043,12 +1180,17 @@ export function DoctorPortalClient() {
                       </label>
                       <input
                         type="date"
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         value={soapForm.followUpDate}
                         onChange={(e) =>
+                          !isLocked &&
                           setSoapForm({ ...soapForm, followUpDate: e.target.value })
                         }
-                        className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm"
+                        className={`w-full rounded-xl border px-3.5 py-2 text-sm ${
+                          isLocked
+                            ? "pointer-events-none cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                     </div>
                     <div>
@@ -1056,52 +1198,85 @@ export function DoctorPortalClient() {
                         Nội dung nhắc tái khám
                       </label>
                       <input
-                        disabled={activeRecord.status === "LOCKED"}
+                        readOnly={isLocked}
                         value={soapForm.followUpNote}
                         onChange={(e) =>
+                          !isLocked &&
                           setSoapForm({ ...soapForm, followUpNote: e.target.value })
                         }
                         placeholder="VD: Soi lại tai sau 7 ngày"
-                        className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm"
+                        className={`w-full rounded-xl border px-3.5 py-2 text-sm ${
+                          isLocked
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                        }`}
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* NẾU BỆNH ÁN ĐÃ KHÓA CỨNG -> CHỈ CHO THÊM GHI CHÚ BỔ SUNG */}
-                {activeRecord.status === "LOCKED" ? (
-                  <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-5">
-                    <h4 className="text-sm font-extrabold text-amber-900">
-                      Ghi chú bổ sung (Addendum) — Bệnh án gốc đã khóa cứng không cho sửa đè
-                    </h4>
-                    <div className="mt-3 space-y-2">
-                      {activeRecord.addendums.map((ad) => (
-                        <div
-                          key={ad.id}
-                          className="rounded-xl bg-white p-3 text-xs border border-amber-200"
-                        >
-                          <p className="font-bold text-[#0F766E]">
-                            {ad.authorName} • {new Date(ad.createdAt).toLocaleString("vi-VN")}
+                {isLocked ? (
+                  <div className="space-y-4">
+                    {activeRecord.invoice && activeRecord.invoice.items?.length > 0 && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs">
+                        <p className="font-extrabold text-[#132A2E]">
+                          Dịch vụ & Đơn thuốc đã chốt ({activeRecord.invoice.invoiceCode}):
+                        </p>
+                        <ul className="mt-2 space-y-1">
+                          {activeRecord.invoice.items.map((it, idx) => (
+                            <li key={idx} className="flex justify-between text-[#476268]">
+                              <span>
+                                • <strong>{it.name}</strong> (SL: {it.quantity})
+                                {it.dosageInstruction ? ` — ${it.dosageInstruction}` : ""}
+                              </span>
+                              <span className="font-bold text-[#132A2E]">
+                                {formatVnd(it.unitPrice * it.quantity)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-5">
+                      <h4 className="text-sm font-extrabold text-amber-900">
+                        Ghi chú bổ sung (Addendum) — Bệnh án gốc đã khóa chỉ đọc, không cho sửa đè
+                      </h4>
+                      <div className="mt-3 space-y-2">
+                        {activeRecord.addendums.length === 0 && (
+                          <p className="text-xs text-amber-800">
+                            Chưa có ghi chú bổ sung nào cho bệnh án này.
                           </p>
-                          <p className="mt-1 text-[#132A2E]">{ad.content}</p>
-                        </div>
-                      ))}
+                        )}
+                        {activeRecord.addendums.map((ad) => (
+                          <div
+                            key={ad.id}
+                            className="rounded-xl border border-amber-200 bg-white p-3 text-xs"
+                          >
+                            <p className="font-bold text-[#0F766E]">
+                              {ad.authorName} • {new Date(ad.createdAt).toLocaleString("vi-VN")}
+                            </p>
+                            <p className="mt-1 text-[#132A2E]">{ad.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <form onSubmit={handleAddAddendum} className="mt-3 flex gap-2">
+                        <input
+                          required
+                          value={addendumText}
+                          onChange={(e) => setAddendumText(e.target.value)}
+                          placeholder="Nhập nội dung đính chính hoặc bổ sung kết quả xét nghiệm..."
+                          className="flex-1 rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-xs"
+                        />
+                        <button
+                          type="submit"
+                          className="rounded-xl bg-[#0F766E] px-4 py-2 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                        >
+                          + Thêm ghi chú bổ sung
+                        </button>
+                      </form>
                     </div>
-                    <form onSubmit={handleAddAddendum} className="mt-3 flex gap-2">
-                      <input
-                        required
-                        value={addendumText}
-                        onChange={(e) => setAddendumText(e.target.value)}
-                        placeholder="Nhập nội dung đính chính hoặc bổ sung kết quả xét nghiệm..."
-                        className="flex-1 rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-xs"
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-xl bg-[#0F766E] px-4 py-2 text-xs font-bold text-white"
-                      >
-                        + Thêm ghi chú bổ sung
-                      </button>
-                    </form>
                   </div>
                 ) : (
                   /* CHƯA KHÓA -> KÊ DỊCH VỤ PHÁT SINH & ĐƠN THUỐC TỪ KHO -> GỬI LỄ TÂN */
@@ -1109,6 +1284,22 @@ export function DoctorPortalClient() {
                     <h4 className="text-sm font-extrabold text-[#132A2E]">
                       Dịch vụ phát sinh & Kê đơn thuốc từ kho (Hiển thị tồn kho hiện tại)
                     </h4>
+
+                    {(lowOrZeroStockDrafts.length > 0 ||
+                      (selectedMedicineObj && selectedMedicineObj.stockQuantity <= 0)) && (
+                      <div className="flex items-start gap-2.5 rounded-xl border-2 border-rose-500 bg-rose-50 p-3.5 text-xs text-rose-800">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                        <div>
+                          <p className="font-extrabold">
+                            CẢNH BÁO TỒN KHO ≤ 0 / KHÔNG ĐỦ TRÊN HỆ THỐNG!
+                          </p>
+                          <p className="mt-0.5">
+                            Mặt hàng tồn kho bằng 0 hoặc thấp hơn số lượng kê — hệ thống{" "}
+                            <strong>vẫn cho phép kê đơn</strong> (tồn kho âm tạm thời khi Lễ tân thu tiền) để không làm gián đoạn điều trị.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex gap-2">
@@ -1126,6 +1317,7 @@ export function DoctorPortalClient() {
                         <button
                           type="button"
                           onClick={handleAddServiceToPos}
+                          title="Thêm dịch vụ"
                           className="rounded-xl bg-[#0F766E] px-3 py-2 text-xs font-bold text-white"
                         >
                           <Plus className="h-4 w-4" />
@@ -1136,18 +1328,24 @@ export function DoctorPortalClient() {
                         <select
                           value={addMedicineId}
                           onChange={(e) => setAddMedicineId(e.target.value)}
-                          className="flex-1 rounded-xl border border-[#132A2E]/15 bg-white px-2.5 py-2 text-xs font-semibold"
+                          className={`flex-1 rounded-xl border bg-white px-2.5 py-2 text-xs font-semibold ${
+                            selectedMedicineObj && selectedMedicineObj.stockQuantity <= 0
+                              ? "border-rose-500 text-rose-700"
+                              : "border-[#132A2E]/15"
+                          }`}
                         >
                           {medicinesAndShared.map((p) => (
                             <option key={p.id} value={p.id}>
                               [{p.group === "MEDICINE" ? "THUỐC" : "SHOP"}] {p.name} — Tồn:{" "}
-                              {p.stockQuantity} {p.retailUnit} ({formatVnd(p.price)})
+                              {p.stockQuantity} {p.retailUnit}
+                              {p.stockQuantity <= 0 ? " (⚠ HẾT TỒN)" : ""} ({formatVnd(p.price)})
                             </option>
                           ))}
                         </select>
                         <button
                           type="button"
                           onClick={handleAddMedicineToPos}
+                          title="Thêm thuốc"
                           className="rounded-xl bg-[#F97316] px-3 py-2 text-xs font-bold text-white"
                         >
                           <Plus className="h-4 w-4" />
@@ -1156,59 +1354,88 @@ export function DoctorPortalClient() {
                     </div>
 
                     <div className="space-y-2">
-                      {posItems.map((it) => (
-                        <div
-                          key={it.key}
-                          className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 text-xs border border-[#132A2E]/10"
-                        >
-                          <div className="flex-1">
-                            <p className="font-bold text-[#132A2E]">{it.name}</p>
-                            {it.itemType === "MEDICINE" && (
-                              <input
-                                value={it.dosageInstruction}
-                                onChange={(e) =>
-                                  setPosItems((prev) =>
-                                    prev.map((row) =>
-                                      row.key === it.key
-                                        ? { ...row, dosageInstruction: e.target.value }
-                                        : row
-                                    )
-                                  )
-                                }
-                                placeholder="Hướng dẫn liều dùng..."
-                                className="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
-                              />
-                            )}
-                          </div>
-                          <input
-                            type="number"
-                            min={1}
-                            value={it.quantity}
-                            onChange={(e) =>
-                              setPosItems((prev) =>
-                                prev.map((row) =>
-                                  row.key === it.key
-                                    ? { ...row, quantity: Math.max(1, Number(e.target.value) || 1) }
-                                    : row
-                                )
-                              )
-                            }
-                            className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-center font-bold"
-                          />
-                          <span className="w-24 text-right font-bold text-[#0F766E]">
-                            {formatVnd(it.unitPrice * it.quantity)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPosItems((prev) => prev.filter((row) => row.key !== it.key))
-                            }
-                            className="text-rose-600 hover:text-rose-800"
+                      {posItems.map((it) => {
+                        const prod = it.productId
+                          ? products.find((p) => p.id === it.productId)
+                          : undefined;
+                        const liveStock = prod ? prod.stockQuantity : it.stockQuantity;
+                        const isOutOrLow =
+                          it.itemType === "MEDICINE" &&
+                          liveStock !== undefined &&
+                          (liveStock <= 0 || it.quantity > liveStock);
+                        return (
+                          <div
+                            key={it.key}
+                            className={`flex items-center justify-between gap-3 rounded-xl border p-3 text-xs ${
+                              isOutOrLow
+                                ? "border-rose-400 bg-rose-50/70"
+                                : "border-[#132A2E]/10 bg-white"
+                            }`}
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
+                            <div className="flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-bold text-[#132A2E]">{it.name}</p>
+                                {it.itemType === "MEDICINE" && liveStock !== undefined && (
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                                      isOutOrLow
+                                        ? "bg-rose-600 text-white"
+                                        : "bg-emerald-100 text-emerald-800"
+                                    }`}
+                                  >
+                                    {isOutOrLow
+                                      ? `⚠ Tồn: ${liveStock} ${it.unit} (Vẫn cho kê)`
+                                      : `Tồn: ${liveStock} ${it.unit}`}
+                                  </span>
+                                )}
+                              </div>
+                              {it.itemType === "MEDICINE" && (
+                                <input
+                                  value={it.dosageInstruction}
+                                  onChange={(e) =>
+                                    setPosItems((prev) =>
+                                      prev.map((row) =>
+                                        row.key === it.key
+                                          ? { ...row, dosageInstruction: e.target.value }
+                                          : row
+                                      )
+                                    )
+                                  }
+                                  placeholder="Hướng dẫn liều dùng..."
+                                  className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px]"
+                                />
+                              )}
+                            </div>
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.quantity}
+                              onChange={(e) =>
+                                setPosItems((prev) =>
+                                  prev.map((row) =>
+                                    row.key === it.key
+                                      ? { ...row, quantity: Math.max(1, Number(e.target.value) || 1) }
+                                      : row
+                                  )
+                                )
+                              }
+                              className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-1 text-center font-bold"
+                            />
+                            <span className="w-24 text-right font-bold text-[#0F766E]">
+                              {formatVnd(it.unitPrice * it.quantity)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPosItems((prev) => prev.filter((row) => row.key !== it.key))
+                              }
+                              className="text-rose-600 hover:text-rose-800"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     <div className="flex items-center justify-between pt-2">
@@ -1227,7 +1454,7 @@ export function DoctorPortalClient() {
                         className="inline-flex items-center gap-2 rounded-xl bg-[#F97316] px-6 py-3 text-sm font-extrabold text-white shadow-md hover:bg-[#EA580C]"
                       >
                         <Send className="h-4 w-4" />
-                        Gửi Lễ tân thanh toán & Về Đang trống
+                        Hoàn tất khám & Gửi Lễ tân thanh toán
                       </button>
                     </div>
                   </div>
@@ -1317,10 +1544,10 @@ export function DoctorPortalClient() {
                       l.isEmergency ? "bg-rose-50 text-rose-900" : "bg-[#FAF9F6]"
                     }`}
                   >
-                    <strong>{l.leaveDate}</strong> ({l.shift}) — {l.reason}{" "}
+                    <strong>{l.leaveDate}</strong> ({formatShift(l.shift)}) — {l.reason}{" "}
                     {l.isEmergency && (
                       <span className="ml-1 rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                        ĐỘT XUẤT
+                        {l.resolvedByReceptionist ? "ĐỘT XUẤT (Đã xử lý)" : "ĐỘT XUẤT (Cảnh báo Lễ tân)"}
                       </span>
                     )}
                   </div>
@@ -1404,6 +1631,37 @@ export function DoctorPortalClient() {
             >
               Xác nhận lập Phiếu xuất kho nội bộ
             </button>
+
+            <div className="border-t border-[#132A2E]/10 pt-4">
+              <h3 className="text-xs font-extrabold uppercase text-[#476268]">
+                Phiếu xuất kho nội bộ gần đây ({internalSlips.length})
+              </h3>
+              <div className="mt-2 space-y-2">
+                {internalSlips.length === 0 && (
+                  <p className="text-xs text-[#476268]">Chưa có phiếu xuất vật tư nào.</p>
+                )}
+                {internalSlips.map((sl) => (
+                  <div
+                    key={sl.id}
+                    className="flex items-center justify-between rounded-xl bg-[#FAF9F6] px-3.5 py-2.5 text-xs"
+                  >
+                    <div>
+                      <span className="font-mono font-bold text-[#0F766E]">
+                        {sl.slipCode}
+                      </span>{" "}
+                      • <strong>{sl.product.name}</strong> ({sl.quantity}{" "}
+                      {sl.product.retailUnit})
+                      <p className="text-[11px] text-[#476268]">
+                        {sl.department} — {sl.reason}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-[#476268]">
+                      {formatDateVn(sl.createdAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </form>
         </div>
       )}

@@ -177,10 +177,28 @@ export async function POST(
   });
 
   if (record.bookingId) {
-    await prisma.booking.update({
+    // Chỉ chuyển lịch hẹn sang COMPLETED khi TẤT CẢ thú cưng trong phiếu đã được gửi POS hoặc khóa cứng
+    const bookingWithPets = await prisma.booking.findUnique({
       where: { id: record.bookingId },
-      data: { status: "COMPLETED" },
+      include: {
+        pets: { select: { id: true } },
+        medicalRecords: { select: { bookingPetId: true, status: true } },
+      },
     });
+    if (bookingWithPets) {
+      const donePetIds = new Set(
+        bookingWithPets.medicalRecords
+          .filter((r) => r.status === "SENT_TO_POS" || r.status === "LOCKED")
+          .map((r) => r.bookingPetId)
+      );
+      const allPetsDone =
+        bookingWithPets.pets.length <= 1 ||
+        bookingWithPets.pets.every((p) => donePetIds.has(p.id));
+      await prisma.booking.update({
+        where: { id: record.bookingId },
+        data: { status: allPetsDone ? "COMPLETED" : "IN_PROGRESS" },
+      });
+    }
   }
 
   return NextResponse.json({

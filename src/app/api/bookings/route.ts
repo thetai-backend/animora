@@ -20,7 +20,24 @@ export async function POST(request: NextRequest) {
   const session = await getSession();
   const body = await request.json();
 
-  const isGuest = !session || Boolean(body.forceGuest);
+  const isStaff =
+    session && (session.role === "RECEPTIONIST" || session.role === "MANAGER");
+
+  // Nếu Lễ tân / Quản lý đặt lịch hộ cho 1 khách thành viên cụ thể
+  const delegatedCustomerId =
+    isStaff && body.customerId && !body.forceGuest
+      ? String(body.customerId).trim()
+      : null;
+
+  const isGuest =
+    Boolean(body.forceGuest) ||
+    (!session && !delegatedCustomerId) ||
+    (Boolean(isStaff) && !delegatedCustomerId);
+
+  const targetCustomerId = isGuest
+    ? null
+    : delegatedCustomerId || session!.userId;
+
   const bookingDate = String(body.bookingDate || "").trim();
   const startTime = String(body.startTime || "").trim();
   const requestedDoctorId =
@@ -46,6 +63,36 @@ export async function POST(request: NextRequest) {
     if (!body.guestName?.trim() || !body.guestPhone?.trim()) {
       return NextResponse.json(
         { error: "Khách vãng lai vui lòng nhập Họ tên và Số điện thoại liên hệ" },
+        { status: 400 }
+      );
+    }
+  } else {
+    // Kiểm tra thú cưng của thành viên: phải tồn tại, thuộc chủ nuôi và còn sống (ALIVE)
+    const memberPetIds = petsInput.map((p) => p.petId).filter(Boolean) as string[];
+    if (memberPetIds.length !== petsInput.length) {
+      return NextResponse.json(
+        { error: "Vui lòng chọn đầy đủ thú cưng từ hồ sơ thành viên" },
+        { status: 400 }
+      );
+    }
+    const dbPets = await prisma.pet.findMany({
+      where: {
+        id: { in: memberPetIds },
+        ownerId: targetCustomerId!,
+      },
+    });
+    if (dbPets.length !== new Set(memberPetIds).size) {
+      return NextResponse.json(
+        { error: "Có thú cưng không hợp lệ hoặc không thuộc hồ sơ khách hàng này" },
+        { status: 400 }
+      );
+    }
+    const deceasedPet = dbPets.find((p) => p.status === "DECEASED");
+    if (deceasedPet) {
+      return NextResponse.json(
+        {
+          error: `Thú cưng "${deceasedPet.name}" đã được đánh dấu Đã mất nên không thể tạo lịch hẹn mới.`,
+        },
         { status: 400 }
       );
     }
@@ -116,7 +163,7 @@ export async function POST(request: NextRequest) {
 
   // Tạo mã đặt lịch duy nhất (ANM-xxxx)
   let bookingCode = generateBookingCode();
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const exists = await prisma.booking.findUnique({ where: { bookingCode } });
     if (!exists) break;
     bookingCode = generateBookingCode();
@@ -127,7 +174,7 @@ export async function POST(request: NextRequest) {
     data: {
       bookingCode,
       isGuest,
-      customerId: isGuest ? null : session!.userId,
+      customerId: targetCustomerId,
       guestName: isGuest ? String(body.guestName).trim() : null,
       guestPhone: isGuest ? String(body.guestPhone).trim() : null,
       guestEmail: isGuest && body.guestEmail ? String(body.guestEmail).trim() : null,
@@ -162,6 +209,7 @@ export async function POST(request: NextRequest) {
       },
     },
     include: {
+      customer: { select: { id: true, fullName: true, email: true, phone: true } },
       doctor: { select: { id: true, fullName: true, title: true } },
       pets: {
         include: {
@@ -172,7 +220,9 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  const emailTarget = isGuest ? booking.guestEmail : session?.email;
+  const emailTarget = isGuest
+    ? booking.guestEmail
+    : booking.customer?.email || session?.email;
   if (emailTarget) {
     console.log(
       `[ANIMORA EMAIL XÁC NHẬN ĐẶT LỊCH] Gửi tới ${emailTarget} — Mã: ${booking.bookingCode} (${bookingDate} ${startTime}-${endTime})`

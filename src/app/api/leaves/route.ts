@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getShiftRange, rangesOverlap, timeToMinutes } from "@/lib/booking-utils";
+import {
+  getShiftRange,
+  getTodayDateStr,
+  rangesOverlap,
+  timeToMinutes,
+} from "@/lib/booking-utils";
 
 export async function GET() {
   const session = await getSession();
@@ -59,8 +64,8 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // Nếu nghỉ đột xuất -> tự chuyển trạng thái bác sĩ sang OFF_DUTY nếu là hôm nay
-  if (isEmergency) {
+  // Nếu nghỉ đột xuất đúng ngày hôm nay -> tự chuyển trạng thái bác sĩ sang OFF_DUTY
+  if (isEmergency && leaveDate === getTodayDateStr()) {
     await prisma.user.update({
       where: { id: doctorId },
       data: { workStatus: "OFF_DUTY" },

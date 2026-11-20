@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get("date") || getTodayDateStr();
 
-  const [doctors, bookings, emergencyLeaves, services, followUpRecords] =
+  const [doctors, bookings, emergencyLeaves, services, followUpRecords, customers] =
     await Promise.all([
       prisma.user.findMany({
         where: { role: "DOCTOR", isActive: true },
@@ -75,6 +75,21 @@ export async function GET(request: NextRequest) {
         orderBy: { followUpDate: "asc" },
         take: 15,
       }),
+      prisma.user.findMany({
+        where: { role: "CUSTOMER", isActive: true },
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          email: true,
+          pets: {
+            where: { status: "ALIVE" },
+            select: { id: true, name: true, species: true, breed: true },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+        orderBy: { fullName: "asc" },
+      }),
     ]);
 
   // Gắn cờ quá giờ 20 phút cho từng booking
@@ -123,5 +138,6 @@ export async function GET(request: NextRequest) {
     emergencyAlerts,
     services,
     followUpRecords,
+    customers,
   });
 }

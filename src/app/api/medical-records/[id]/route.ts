@@ -61,13 +61,16 @@ export async function PATCH(
   }
 
   const { id } = await context.params;
-  const existing = await prisma.medicalRecord.findUnique({ where: { id } });
+  const existing = await prisma.medicalRecord.findUnique({
+    where: { id },
+    include: { invoice: { select: { status: true } } },
+  });
   if (!existing) {
     return NextResponse.json({ error: "Không tìm thấy bệnh án" }, { status: 404 });
   }
 
   // Rule 6: Bệnh án đã thanh toán -> KHÓA CỨNG, cấm sửa đè!
-  if (existing.status === "LOCKED") {
+  if (existing.status === "LOCKED" || existing.invoice?.status === "PAID") {
     return NextResponse.json(
       {
         error:

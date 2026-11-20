@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getTodayDateStr } from "@/lib/booking-utils";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session || !["DOCTOR", "MANAGER"].includes(session.role)) {
     return NextResponse.json({ error: "Không có quyền truy cập khu vực Bác sĩ" }, { status: 403 });
@@ -28,72 +28,84 @@ export async function GET() {
     return NextResponse.json({ error: "Không tìm thấy hồ sơ bác sĩ" }, { status: 404 });
   }
 
-  const today = getTodayDateStr();
+  const { searchParams } = new URL(request.url);
+  const selectedDate = searchParams.get("date") || getTodayDateStr();
 
-  const [queueBookings, medicalRecords, leaves, services, products] = await Promise.all([
-    prisma.booking.findMany({
-      where: {
-        doctorId: doctorUser.id,
-        bookingDate: today,
-        status: { in: ["CHECKED_IN", "IN_PROGRESS", "CONFIRMED"] },
-      },
-      include: {
-        customer: { select: { id: true, fullName: true, phone: true } },
-        pets: {
-          include: {
-            pet: true,
-            services: true,
+  const [queueBookings, medicalRecords, leaves, services, products, internalSlips] =
+    await Promise.all([
+      prisma.booking.findMany({
+        where: {
+          doctorId: doctorUser.id,
+          bookingDate: selectedDate,
+          status: { in: ["CHECKED_IN", "IN_PROGRESS", "CONFIRMED"] },
+        },
+        include: {
+          customer: { select: { id: true, fullName: true, phone: true } },
+          pets: {
+            include: {
+              pet: true,
+              services: true,
+            },
+          },
+          medicalRecords: {
+            select: { id: true, recordCode: true, status: true, bookingPetId: true },
           },
         },
-        medicalRecords: {
-          select: { id: true, recordCode: true, status: true, bookingPetId: true },
+        orderBy: { startTime: "asc" },
+      }),
+      prisma.medicalRecord.findMany({
+        where: { doctorId: doctorUser.id },
+        include: {
+          customer: { select: { id: true, fullName: true, phone: true } },
+          pet: true,
+          addendums: { orderBy: { createdAt: "asc" } },
+          invoice: {
+            include: { items: true },
+          },
         },
-      },
-      orderBy: { startTime: "asc" },
-    }),
-    prisma.medicalRecord.findMany({
-      where: { doctorId: doctorUser.id },
-      include: {
-        customer: { select: { id: true, fullName: true, phone: true } },
-        pet: true,
-        addendums: { orderBy: { createdAt: "asc" } },
-        invoice: {
-          include: { items: true },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      }),
+      prisma.doctorLeave.findMany({
+        where: { doctorId: doctorUser.id },
+        orderBy: { leaveDate: "desc" },
+        take: 20,
+      }),
+      prisma.service.findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: "asc" },
+      }),
+      prisma.product.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          group: true,
+          price: true,
+          retailUnit: true,
+          stockQuantity: true,
         },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-    }),
-    prisma.doctorLeave.findMany({
-      where: { doctorId: doctorUser.id },
-      orderBy: { leaveDate: "desc" },
-      take: 20,
-    }),
-    prisma.service.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: "asc" },
-    }),
-    prisma.product.findMany({
-      where: { isActive: true },
-      select: {
-        id: true,
-        sku: true,
-        name: true,
-        group: true,
-        price: true,
-        retailUnit: true,
-        stockQuantity: true,
-      },
-      orderBy: [{ group: "asc" }, { name: "asc" }],
-    }),
-  ]);
+        orderBy: [{ group: "asc" }, { name: "asc" }],
+      }),
+      prisma.internalUsageSlip.findMany({
+        where: { createdById: doctorUser.id },
+        include: {
+          product: { select: { name: true, retailUnit: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 15,
+      }),
+    ]);
 
   return NextResponse.json({
+    date: selectedDate,
     doctor: doctorUser,
     queueBookings,
     medicalRecords,
     leaves,
     services,
     products,
+    internalSlips,
   });
 }

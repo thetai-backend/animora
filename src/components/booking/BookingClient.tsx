@@ -54,6 +54,7 @@ interface PetDraft {
   guestPetName: string;
   guestPetSpecies: string;
   guestPetBreed: string;
+  guestPetNote: string;
   serviceIds: string[];
 }
 
@@ -100,6 +101,7 @@ export function BookingClient({
           guestPetName: "",
           guestPetSpecies: "DOG",
           guestPetBreed: "",
+          guestPetNote: "",
           serviceIds: services[0] ? [services[0].id] : [],
         },
       ];
@@ -110,10 +112,23 @@ export function BookingClient({
         guestPetName: "",
         guestPetSpecies: "DOG",
         guestPetBreed: "",
+        guestPetNote: "",
         serviceIds: services[0] ? [services[0].id] : [],
       },
     ];
   });
+
+  const handleSwitchMode = (nextMode: "MEMBER" | "GUEST") => {
+    setMode(nextMode);
+    if (nextMode === "MEMBER" && customerPets.length > 0) {
+      setPetDrafts((prev) =>
+        prev.map((d, idx) => ({
+          ...d,
+          petId: d.petId || customerPets[idx % customerPets.length].id,
+        }))
+      );
+    }
+  };
 
   const [slots, setSlots] = useState<SlotItem[]>([]);
   const [lunchEnabled, setLunchEnabled] = useState(false);
@@ -196,6 +211,7 @@ export function BookingClient({
         guestPetName: "",
         guestPetSpecies: "CAT",
         guestPetBreed: "",
+        guestPetNote: "",
         serviceIds: services[0] ? [services[0].id] : [],
       },
     ]);
@@ -265,6 +281,7 @@ export function BookingClient({
             guestPetName: mode === "GUEST" ? p.guestPetName : undefined,
             guestPetSpecies: mode === "GUEST" ? p.guestPetSpecies : undefined,
             guestPetBreed: mode === "GUEST" ? p.guestPetBreed : undefined,
+            guestPetNote: mode === "GUEST" ? p.guestPetNote : undefined,
             serviceIds: p.serviceIds,
           })),
         }),
@@ -394,7 +411,7 @@ export function BookingClient({
           <div className="mt-6 grid grid-cols-2 gap-3 rounded-2xl bg-[#FAF9F6] p-1.5">
             <button
               type="button"
-              onClick={() => setMode("MEMBER")}
+              onClick={() => handleSwitchMode("MEMBER")}
               disabled={!session || customerPets.length === 0}
               className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition ${
                 mode === "MEMBER"
@@ -411,7 +428,7 @@ export function BookingClient({
             </button>
             <button
               type="button"
-              onClick={() => setMode("GUEST")}
+              onClick={() => handleSwitchMode("GUEST")}
               className={`flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition ${
                 mode === "GUEST"
                   ? "bg-[#F97316] text-white shadow-sm"
@@ -422,6 +439,20 @@ export function BookingClient({
               Đặt nhanh Khách vãng lai (Không cần tài khoản)
             </button>
           </div>
+
+          {session && customerPets.length === 0 && (
+            <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#0F766E]/20 bg-[#0F766E]/6 px-4 py-3 text-xs text-[#132A2E]">
+              <span>
+                Tài khoản của bạn chưa có hồ sơ thú cưng. Thêm thú cưng để lưu sổ bệnh án điện tử tự động!
+              </span>
+              <Link
+                href="/tai-khoan"
+                className="shrink-0 rounded-lg bg-[#0F766E] px-3 py-1.5 font-bold text-white hover:bg-[#0B5D56]"
+              >
+                + Thêm thú cưng ngay
+              </Link>
+            </div>
+          )}
 
           {mode === "GUEST" && (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-950">
@@ -602,6 +633,26 @@ export function BookingClient({
                           )
                         }
                         placeholder="VD: Poodle / Mèo Anh"
+                        className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F766E]"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <label className="mb-1 block text-xs font-bold text-[#132A2E]">
+                        Ghi chú tình trạng / tuổi bé (tùy chọn)
+                      </label>
+                      <input
+                        type="text"
+                        value={draft.guestPetNote}
+                        onChange={(e) =>
+                          setPetDrafts((prev) =>
+                            prev.map((p) =>
+                              p.key === draft.key
+                                ? { ...p, guestPetNote: e.target.value }
+                                : p
+                            )
+                          )
+                        }
+                        placeholder="VD: 2 tuổi, nặng khoảng 4kg, hơi nhát người lạ..."
                         className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F766E]"
                       />
                     </div>

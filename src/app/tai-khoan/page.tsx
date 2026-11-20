@@ -18,16 +18,39 @@ export default async function CustomerPortalPage({
   }
 
   const sp = await searchParams;
-  const user = await prisma.user.findUnique({
-    where: { id: session.userId },
-    select: {
-      id: true,
-      email: true,
-      fullName: true,
-      phone: true,
-      address: true,
-    },
-  });
+  const [user, services, doctors] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: session.userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        address: true,
+      },
+    }),
+    prisma.service.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        price: true,
+        durationMinutes: true,
+      },
+    }),
+    prisma.user.findMany({
+      where: { role: "DOCTOR", isActive: true },
+      orderBy: { fullName: "asc" },
+      select: {
+        id: true,
+        fullName: true,
+        title: true,
+        specialty: true,
+      },
+    }),
+  ]);
 
   if (!user) {
     redirect("/dang-nhap");
@@ -37,10 +60,14 @@ export default async function CustomerPortalPage({
     <RolePortalShell
       session={session}
       pageTitle="Khu vực Khách hàng & Hồ sơ Thú cưng"
-      pageSubtitle="Quản lý thông tin cá nhân, sổ sức khỏe từng thú cưng, lịch hẹn đặt trước và lịch sử bệnh án S.O.A.P."
+      pageSubtitle="Quản lý thông tin cá nhân, sổ sức khỏe từng thú cưng, đặt lịch khám/spa trực tiếp và xem lịch sử bệnh án S.O.A.P."
       notice={sp.notice}
     >
-      <CustomerPortalClient initialProfile={user} />
+      <CustomerPortalClient
+        initialProfile={user}
+        services={services}
+        doctors={doctors}
+      />
     </RolePortalShell>
   );
 }

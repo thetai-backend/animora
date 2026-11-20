@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
+  CalendarPlus,
   CreditCard,
   AlertTriangle,
   UserPlus,
@@ -18,8 +19,20 @@ import {
   ShieldAlert,
   Save,
   History,
+  X,
+  XCircle,
+  Stethoscope,
+  Sparkles,
+  BellRing,
 } from "lucide-react";
-import { formatDateVn, formatSpecies, formatVnd, formatWorkStatus } from "@/lib/format";
+import {
+  formatBookingStatus,
+  formatDateVn,
+  formatShift,
+  formatSpecies,
+  formatVnd,
+  formatWorkStatus,
+} from "@/lib/format";
 import { buildVietQrUrl, calculateInvoiceTotals } from "@/lib/pricing-utils";
 
 interface DoctorInfo {
@@ -79,6 +92,40 @@ interface ServiceItem {
   name: string;
   price: number;
   category: string;
+  durationMinutes: number;
+}
+
+interface CustomerOption {
+  id: string;
+  fullName: string;
+  phone: string | null;
+  email: string;
+  pets: {
+    id: string;
+    name: string;
+    species: string;
+    breed: string | null;
+  }[];
+}
+
+interface FollowUpRecord {
+  id: string;
+  recordCode: string;
+  followUpDate: string;
+  followUpNote: string | null;
+  guestOwnerName: string | null;
+  guestOwnerPhone: string | null;
+  guestPetName: string | null;
+  customer: { fullName: string; phone: string | null; email: string } | null;
+  pet: { name: string; species: string; status: string } | null;
+  doctor: { fullName: string };
+}
+
+interface SlotItem {
+  time: string;
+  available: boolean;
+  availableDoctorIds: string[];
+  reason?: string;
 }
 
 interface PosProduct {
@@ -166,6 +213,8 @@ export function ReceptionPortalClient() {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlert[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [followUpRecords, setFollowUpRecords] = useState<FollowUpRecord[]>([]);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [walkInForm, setWalkInForm] = useState({
     doctorId: "",
@@ -178,6 +227,38 @@ export function ReceptionPortalClient() {
     isEmergency: false,
     notes: "",
   });
+
+  // Modal Tạo đặt lịch hộ (Member hoặc Guest)
+  const [assistBookingOpen, setAssistBookingOpen] = useState(false);
+  const [assistType, setAssistType] = useState<"MEMBER" | "GUEST">("GUEST");
+  const [assistCustomerId, setAssistCustomerId] = useState("");
+  const [assistMemberPets, setAssistMemberPets] = useState<Record<string, string[]>>({});
+  const [assistGuestName, setAssistGuestName] = useState("");
+  const [assistGuestPhone, setAssistGuestPhone] = useState("");
+  const [assistGuestEmail, setAssistGuestEmail] = useState("");
+  const [assistGuestPets, setAssistGuestPets] = useState<
+    { key: string; name: string; species: string; breed: string; serviceIds: string[] }[]
+  >([]);
+  const [assistDate, setAssistDate] = useState(getTodayStr());
+  const [assistDoctorId, setAssistDoctorId] = useState("AUTO");
+  const [assistTime, setAssistTime] = useState("");
+  const [assistNotes, setAssistNotes] = useState("");
+  const [assistSlots, setAssistSlots] = useState<SlotItem[]>([]);
+  const [assistLoadingSlots, setAssistLoadingSlots] = useState(false);
+  const [assistSubmitting, setAssistSubmitting] = useState(false);
+
+  // Modal Dời ngày/giờ hẹn (thay thế window.prompt)
+  const [rescheduleTarget, setRescheduleTarget] = useState<{
+    id: string;
+    bookingCode: string;
+    bookingDate: string;
+    startTime: string;
+    doctorId: string | null;
+  } | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState(getTodayStr());
+  const [rescheduleTime, setRescheduleTime] = useState("16:00");
+  const [rescheduleDoctorId, setRescheduleDoctorId] = useState<string>("");
+  const [rescheduleSlots, setRescheduleSlots] = useState<SlotItem[]>([]);
 
   // POS state
   const [pendingInvoices, setPendingInvoices] = useState<PosInvoice[]>([]);
@@ -218,6 +299,8 @@ export function ReceptionPortalClient() {
     setBookings(data.bookings || []);
     setEmergencyAlerts(data.emergencyAlerts || []);
     setServices(data.services || []);
+    setCustomers(data.customers || []);
+    setFollowUpRecords(data.followUpRecords || []);
     if (data.services?.length && !walkInForm.serviceId) {
       setWalkInForm((f) => ({ ...f, serviceId: data.services[0].id }));
     }
@@ -259,6 +342,171 @@ export function ReceptionPortalClient() {
 
   const availableDoctors = doctors.filter((d) => d.workStatus === "AVAILABLE");
 
+  const serviceById = useMemo(
+    () => new Map(services.map((s) => [s.id, s])),
+    [services]
+  );
+
+  const assistLockedDuration = useMemo(() => {
+    let dur = 0;
+    if (assistType === "MEMBER") {
+      for (const sids of Object.values(assistMemberPets)) {
+        for (const sid of sids) {
+          dur += serviceById.get(sid)?.durationMinutes || 0;
+        }
+      }
+    } else {
+      for (const gp of assistGuestPets) {
+        for (const sid of gp.serviceIds) {
+          dur += serviceById.get(sid)?.durationMinutes || 0;
+        }
+      }
+    }
+    return Math.max(30, Math.ceil((dur || 30) / 30) * 30);
+  }, [assistType, assistMemberPets, assistGuestPets, serviceById]);
+
+  useEffect(() => {
+    if (!assistBookingOpen) return;
+    let active = true;
+    setAssistLoadingSlots(true);
+    setAssistTime("");
+    fetch(
+      `/api/booking/availability?date=${encodeURIComponent(
+        assistDate
+      )}&duration=${assistLockedDuration}&doctorId=${encodeURIComponent(assistDoctorId)}`
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (active) setAssistSlots(d.slots || []);
+      })
+      .catch(() => {
+        if (active) setAssistSlots([]);
+      })
+      .finally(() => {
+        if (active) setAssistLoadingSlots(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assistBookingOpen, assistDate, assistLockedDuration, assistDoctorId]);
+
+  useEffect(() => {
+    if (!rescheduleTarget) return;
+    let active = true;
+    fetch(
+      `/api/booking/availability?date=${encodeURIComponent(
+        rescheduleDate
+      )}&duration=30&doctorId=${encodeURIComponent(rescheduleDoctorId || "AUTO")}`
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (active) setRescheduleSlots(d.slots || []);
+      })
+      .catch(() => {
+        if (active) setRescheduleSlots([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [rescheduleTarget, rescheduleDate, rescheduleDoctorId]);
+
+  const openAssistBookingModal = () => {
+    setAssistType("GUEST");
+    setAssistDate(date);
+    setAssistDoctorId("AUTO");
+    setAssistTime("");
+    setAssistNotes("");
+    setAssistGuestName("");
+    setAssistGuestPhone("");
+    setAssistGuestEmail("");
+    setAssistGuestPets([
+      {
+        key: "gp-1",
+        name: "",
+        species: "DOG",
+        breed: "",
+        serviceIds: services[0] ? [services[0].id] : [],
+      },
+    ]);
+    const firstMemberWithPets = customers.find((c) => c.pets.length > 0) || customers[0];
+    if (firstMemberWithPets) {
+      setAssistCustomerId(firstMemberWithPets.id);
+      if (firstMemberWithPets.pets[0]) {
+        setAssistMemberPets({
+          [firstMemberWithPets.pets[0].id]: services[0] ? [services[0].id] : [],
+        });
+      } else {
+        setAssistMemberPets({});
+      }
+    }
+    setAssistBookingOpen(true);
+  };
+
+  const handleSubmitAssistBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assistTime) {
+      notify("Vui lòng chọn một khung giờ còn trống", "err");
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      forceGuest: assistType === "GUEST",
+      bookingDate: assistDate,
+      startTime: assistTime,
+      doctorId: assistDoctorId,
+      notes: assistNotes,
+    };
+
+    if (assistType === "MEMBER") {
+      const petIds = Object.keys(assistMemberPets);
+      if (!assistCustomerId || petIds.length === 0) {
+        notify("Vui lòng chọn khách thành viên và tick ít nhất 1 thú cưng", "err");
+        return;
+      }
+      payload.customerId = assistCustomerId;
+      payload.pets = petIds.map((pid) => ({
+        petId: pid,
+        serviceIds: assistMemberPets[pid],
+      }));
+    } else {
+      if (!assistGuestName.trim() || !assistGuestPhone.trim()) {
+        notify("Vui lòng nhập Họ tên và SĐT khách vãng lai", "err");
+        return;
+      }
+      payload.guestName = assistGuestName;
+      payload.guestPhone = assistGuestPhone;
+      payload.guestEmail = assistGuestEmail;
+      payload.pets = assistGuestPets.map((gp) => ({
+        guestPetName: gp.name,
+        guestPetSpecies: gp.species,
+        guestPetBreed: gp.breed,
+        serviceIds: gp.serviceIds,
+      }));
+    }
+
+    setAssistSubmitting(true);
+    try {
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notify(data.error || "Không thể tạo đặt lịch hộ", "err");
+        return;
+      }
+      setAssistBookingOpen(false);
+      setDate(assistDate);
+      notify(
+        `Đã tạo đặt lịch hộ thành công! Mã: ${data.booking.bookingCode} (${data.booking.bookingDate} ${data.booking.startTime}–${data.booking.endTime})`
+      );
+      await loadDispatch(assistDate);
+    } finally {
+      setAssistSubmitting(false);
+    }
+  };
+
   // --- DISPATCH ACTIONS ---
   const handleCheckIn = async (bookingId: string) => {
     const res = await fetch(`/api/bookings/${bookingId}`, {
@@ -273,6 +521,7 @@ export function ReceptionPortalClient() {
   };
 
   const handleReassignDoctor = async (bookingId: string, newDoctorId: string) => {
+    if (!newDoctorId) return;
     const res = await fetch(`/api/bookings/${bookingId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -284,17 +533,57 @@ export function ReceptionPortalClient() {
     }
   };
 
-  const handleRescheduleTime = async (bookingId: string) => {
-    const newTime = window.prompt("Nhập giờ mới muốn dời (định dạng HH:mm, VD: 17:00):", "17:00");
-    if (!newTime || !/^\d{2}:\d{2}$/.test(newTime.trim())) return;
-    const res = await fetch(`/api/bookings/${bookingId}`, {
+  const openRescheduleModal = (b: {
+    id: string;
+    bookingCode: string;
+    bookingDate: string;
+    startTime: string;
+    doctorId: string | null;
+  }) => {
+    setRescheduleTarget(b);
+    setRescheduleDate(b.bookingDate);
+    setRescheduleTime(b.startTime);
+    setRescheduleDoctorId(b.doctorId || "");
+  };
+
+  const handleConfirmReschedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rescheduleTarget || !rescheduleTime) return;
+    const res = await fetch(`/api/bookings/${rescheduleTarget.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ startTime: newTime.trim() }),
+      body: JSON.stringify({
+        bookingDate: rescheduleDate,
+        startTime: rescheduleTime,
+        ...(rescheduleDoctorId ? { doctorId: rescheduleDoctorId } : {}),
+      }),
     });
     if (res.ok) {
-      notify(`Đã dời lịch sang khung giờ ${newTime.trim()}!`);
+      notify(
+        `Đã dời lịch ${rescheduleTarget.bookingCode} sang ${rescheduleDate} lúc ${rescheduleTime}!`
+      );
+      setRescheduleTarget(null);
       await loadDispatch();
+    } else {
+      notify("Không thể dời lịch hẹn", "err");
+    }
+  };
+
+  const handleCancelBookingStaff = async (bookingId: string, bookingCode: string) => {
+    const res = await fetch("/api/bookings/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookingId,
+        cancelReason: "Lễ tân hủy lịch theo yêu cầu khách hàng",
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      notify(data.message || `Đã hủy lịch ${bookingCode}!`);
+      await loadDispatch();
+    } else {
+      notify(data.error || "Không thể hủy lịch", "err");
     }
   };
 
@@ -486,6 +775,23 @@ export function ReceptionPortalClient() {
     });
   };
 
+  const handleToggleLunchBreak = async () => {
+    const nextVal = !lunchBreakEnabled;
+    setLunchBreakEnabled(nextVal);
+    const res = await fetch("/api/schedules", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lunchBreakEnabled: nextVal }),
+    });
+    if (res.ok) {
+      notify(
+        nextVal
+          ? "Đã BẬT giờ nghỉ trưa (12:00–13:30). Các ô đặt lịch buổi trưa đã lập tức bị khóa!"
+          : "Đã TẮT giờ nghỉ trưa. Phòng khám mở đặt lịch xuyên trưa 07:00–20:00!"
+      );
+    }
+  };
+
   const handleSaveSchedules = async () => {
     setSavingSchedule(true);
     const res = await fetch("/api/schedules", {
@@ -603,12 +909,7 @@ export function ReceptionPortalClient() {
                       <div>
                         <p className="text-sm font-extrabold text-rose-700">
                           {alert.doctor.fullName} — Nghỉ đột xuất ngày {alert.leaveDate} (
-                          {alert.shift === "MORNING"
-                            ? "Ca sáng"
-                            : alert.shift === "AFTERNOON"
-                            ? "Ca chiều"
-                            : "Cả ngày"}
-                          )
+                          {formatShift(alert.shift)})
                         </p>
                         <p className="text-xs text-[#476268]">Lý do: {alert.reason}</p>
                       </div>
@@ -662,7 +963,15 @@ export function ReceptionPortalClient() {
                                   ))}
                               </select>
                               <button
-                                onClick={() => handleRescheduleTime(ab.id)}
+                                onClick={() =>
+                                  openRescheduleModal({
+                                    id: ab.id,
+                                    bookingCode: ab.bookingCode,
+                                    bookingDate: alert.leaveDate,
+                                    startTime: ab.startTime,
+                                    doctorId: alert.doctorId,
+                                  })
+                                }
                                 className="rounded-lg border border-[#0F766E] bg-white px-3 py-1.5 font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
                               >
                                 Dời lịch
@@ -759,11 +1068,19 @@ export function ReceptionPortalClient() {
                     }
                     className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2.5 text-sm font-bold"
                   >
-                    {availableDoctors.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.fullName} (Đang trống)
-                      </option>
-                    ))}
+                    <option value="" disabled>
+                      -- Chọn bác sĩ đang trống --
+                    </option>
+                    {doctors.map((d) => {
+                      const isAvail = d.workStatus === "AVAILABLE";
+                      const stLabel = formatWorkStatus(d.workStatus).label;
+                      return (
+                        <option key={d.id} value={d.id} disabled={!isAvail}>
+                          {d.fullName} ({stLabel}
+                          {!isAvail ? " — Bị khóa" : ""})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -830,6 +1147,19 @@ export function ReceptionPortalClient() {
                     ))}
                   </select>
                 </div>
+                <div className="col-span-3">
+                  <label className="mb-1 block text-xs font-bold">
+                    Ghi chú triệu chứng / tình trạng tiếp nhận
+                  </label>
+                  <input
+                    value={walkInForm.notes}
+                    onChange={(e) =>
+                      setWalkInForm({ ...walkInForm, notes: e.target.value })
+                    }
+                    placeholder="VD: Bé bị nôn 3 lần sáng nay, cần khám ngay..."
+                    className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
 
               <div className="mt-4 flex items-center justify-between">
@@ -864,23 +1194,544 @@ export function ReceptionPortalClient() {
             </form>
           )}
 
+          {/* MODAL DỜI NGÀY / GIỜ HẸN */}
+          {rescheduleTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#132A2E]/60 p-6 backdrop-blur-xs">
+              <form
+                onSubmit={handleConfirmReschedule}
+                className="w-full max-w-xl rounded-3xl border border-[#0F766E]/20 bg-white p-7 shadow-2xl space-y-5"
+              >
+                <div className="flex items-center justify-between border-b border-[#132A2E]/10 pb-3">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-[#132A2E]">
+                      Dời ngày / giờ hẹn —{" "}
+                      <span className="font-mono text-[#0F766E]">
+                        {rescheduleTarget.bookingCode}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-[#476268]">
+                      Chọn ngày, bác sĩ và khung giờ trống mới cho khách hàng.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleTarget(null)}
+                    className="rounded-lg p-1.5 text-[#476268] hover:bg-slate-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold">Ngày hẹn mới</label>
+                    <input
+                      type="date"
+                      required
+                      value={rescheduleDate}
+                      onChange={(e) => setRescheduleDate(e.target.value)}
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold">Bác sĩ phụ trách</label>
+                    <select
+                      value={rescheduleDoctorId}
+                      onChange={(e) => setRescheduleDoctorId(e.target.value)}
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-bold"
+                    >
+                      <option value="">Giữ nguyên bác sĩ hiện tại</option>
+                      {doctors.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-bold">
+                    Chọn khung giờ mới (07:00 – 19:30):
+                  </label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {rescheduleSlots.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => setRescheduleTime(slot.time)}
+                        title={slot.reason || "Còn trống"}
+                        className={`rounded-xl border px-2 py-2 text-xs font-bold transition ${
+                          rescheduleTime === slot.time
+                            ? "border-[#F97316] bg-[#F97316] text-white"
+                            : slot.available
+                            ? "border-[#0F766E]/25 bg-white text-[#132A2E] hover:bg-[#0F766E]/8"
+                            : "border-slate-200 bg-slate-100 text-slate-400"
+                        }`}
+                      >
+                        {slot.time}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-[#132A2E]/10 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleTarget(null)}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold"
+                  >
+                    Đóng
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-[#0F766E] px-5 py-2 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                  >
+                    Xác nhận dời lịch ({rescheduleDate} • {rescheduleTime})
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* MODAL TẠO ĐẶT LỊCH HỘ (MEMBER & GUEST) */}
+          {assistBookingOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#132A2E]/60 p-6 backdrop-blur-xs">
+              <form
+                onSubmit={handleSubmitAssistBooking}
+                className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-[#0F766E]/20 bg-white p-8 shadow-2xl space-y-5"
+              >
+                <div className="flex items-start justify-between border-b border-[#132A2E]/10 pb-4">
+                  <div>
+                    <h3 className="text-xl font-extrabold text-[#132A2E]">
+                      Tạo Đặt lịch hộ Khách hàng (Thành viên / Khách vãng lai)
+                    </h3>
+                    <p className="text-xs text-[#476268]">
+                      Khách vãng lai chỉ lưu tạm trên Phiếu đặt lịch, không tạo hồ sơ cố định.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAssistBookingOpen(false)}
+                    className="rounded-lg p-1.5 text-[#476268] hover:bg-slate-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 rounded-2xl bg-[#FAF9F6] p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAssistType("MEMBER")}
+                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${
+                      assistType === "MEMBER"
+                        ? "bg-[#0F766E] text-white"
+                        : "text-[#476268]"
+                    }`}
+                  >
+                    Khách hàng Thành viên ({customers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssistType("GUEST")}
+                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${
+                      assistType === "GUEST"
+                        ? "bg-[#F97316] text-white"
+                        : "text-[#476268]"
+                    }`}
+                  >
+                    Khách vãng lai (Guest)
+                  </button>
+                </div>
+
+                {assistType === "MEMBER" ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-bold">
+                        Chọn Khách hàng thành viên *
+                      </label>
+                      <select
+                        value={assistCustomerId}
+                        onChange={(e) => {
+                          const cid = e.target.value;
+                          setAssistCustomerId(cid);
+                          const found = customers.find((c) => c.id === cid);
+                          if (found?.pets[0]) {
+                            setAssistMemberPets({
+                              [found.pets[0].id]: services[0] ? [services[0].id] : [],
+                            });
+                          } else {
+                            setAssistMemberPets({});
+                          }
+                        }}
+                        className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-bold"
+                      >
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.fullName} ({c.phone || c.email}) — {c.pets.length} thú cưng
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {(() => {
+                      const activeCust = customers.find((c) => c.id === assistCustomerId);
+                      if (!activeCust || activeCust.pets.length === 0) {
+                        return (
+                          <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                            Khách hàng này chưa có thú cưng đang chăm sóc trong hồ sơ.
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className="space-y-3">
+                          {activeCust.pets.map((pet) => {
+                            const ticked = Boolean(assistMemberPets[pet.id]);
+                            const chosen = assistMemberPets[pet.id] || [];
+                            return (
+                              <div
+                                key={pet.id}
+                                className="rounded-2xl border border-[#132A2E]/12 bg-[#FAF9F6] p-4"
+                              >
+                                <label className="flex cursor-pointer items-center gap-2 text-xs font-extrabold">
+                                  <input
+                                    type="checkbox"
+                                    checked={ticked}
+                                    onChange={() =>
+                                      setAssistMemberPets((prev) => {
+                                        const next = { ...prev };
+                                        if (next[pet.id]) delete next[pet.id];
+                                        else
+                                          next[pet.id] = services[0]
+                                            ? [services[0].id]
+                                            : [];
+                                        return next;
+                                      })
+                                    }
+                                    className="h-4 w-4 accent-[#0F766E]"
+                                  />
+                                  🐾 {pet.name} ({formatSpecies(pet.species)}
+                                  {pet.breed ? ` • ${pet.breed}` : ""})
+                                </label>
+                                {ticked && (
+                                  <div className="mt-2.5 grid grid-cols-2 gap-2">
+                                    {services.map((srv) => {
+                                      const isSel = chosen.includes(srv.id);
+                                      return (
+                                        <button
+                                          key={srv.id}
+                                          type="button"
+                                          onClick={() =>
+                                            setAssistMemberPets((prev) => ({
+                                              ...prev,
+                                              [pet.id]: isSel
+                                                ? (prev[pet.id] || []).filter(
+                                                    (id) => id !== srv.id
+                                                  )
+                                                : [...(prev[pet.id] || []), srv.id],
+                                            }))
+                                          }
+                                          className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs ${
+                                            isSel
+                                              ? "border-[#0F766E] bg-white font-bold"
+                                              : "border-[#132A2E]/10 bg-white/60"
+                                          }`}
+                                        >
+                                          <span className="flex items-center gap-1 truncate">
+                                            {srv.category === "MEDICAL" ? (
+                                              <Stethoscope className="h-3 w-3 text-[#0F766E]" />
+                                            ) : (
+                                              <Sparkles className="h-3 w-3 text-[#F97316]" />
+                                            )}
+                                            <span className="truncate">{srv.name}</span>
+                                          </span>
+                                          <span className="shrink-0 text-[11px] text-[#0F766E]">
+                                            {srv.durationMinutes}p
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-bold">Họ tên khách *</label>
+                        <input
+                          required
+                          value={assistGuestName}
+                          onChange={(e) => setAssistGuestName(e.target.value)}
+                          placeholder="VD: Trần Minh Khoa"
+                          className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold">Số điện thoại *</label>
+                        <input
+                          required
+                          value={assistGuestPhone}
+                          onChange={(e) => setAssistGuestPhone(e.target.value)}
+                          placeholder="VD: 0909111222"
+                          className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold">Email (tùy chọn)</label>
+                        <input
+                          type="email"
+                          value={assistGuestEmail}
+                          onChange={(e) => setAssistGuestEmail(e.target.value)}
+                          placeholder="email@gmail.com"
+                          className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {assistGuestPets.map((gp, idx) => (
+                      <div
+                        key={gp.key}
+                        className="rounded-2xl border border-[#132A2E]/12 bg-[#FAF9F6] p-4 space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-[#0F766E]">
+                            Thú cưng khách vãng lai #{idx + 1}
+                          </span>
+                          {assistGuestPets.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setAssistGuestPets((prev) =>
+                                  prev.filter((item) => item.key !== gp.key)
+                                )
+                              }
+                              className="text-xs font-bold text-rose-600"
+                            >
+                              Bỏ bé này
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <input
+                            required
+                            placeholder="Tên thú cưng *"
+                            value={gp.name}
+                            onChange={(e) =>
+                              setAssistGuestPets((prev) =>
+                                prev.map((x) =>
+                                  x.key === gp.key ? { ...x, name: e.target.value } : x
+                                )
+                              )
+                            }
+                            className="rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs"
+                          />
+                          <select
+                            value={gp.species}
+                            onChange={(e) =>
+                              setAssistGuestPets((prev) =>
+                                prev.map((x) =>
+                                  x.key === gp.key ? { ...x, species: e.target.value } : x
+                                )
+                              )
+                            }
+                            className="rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs"
+                          >
+                            <option value="DOG">Chó</option>
+                            <option value="CAT">Mèo</option>
+                            <option value="OTHER">Khác</option>
+                          </select>
+                          <input
+                            placeholder="Giống (tùy chọn)"
+                            value={gp.breed}
+                            onChange={(e) =>
+                              setAssistGuestPets((prev) =>
+                                prev.map((x) =>
+                                  x.key === gp.key ? { ...x, breed: e.target.value } : x
+                                )
+                              )
+                            }
+                            className="rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {services.map((srv) => {
+                            const isSel = gp.serviceIds.includes(srv.id);
+                            return (
+                              <button
+                                key={srv.id}
+                                type="button"
+                                onClick={() =>
+                                  setAssistGuestPets((prev) =>
+                                    prev.map((x) =>
+                                      x.key === gp.key
+                                        ? {
+                                            ...x,
+                                            serviceIds: isSel
+                                              ? x.serviceIds.filter((id) => id !== srv.id)
+                                              : [...x.serviceIds, srv.id],
+                                          }
+                                        : x
+                                    )
+                                  )
+                                }
+                                className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs ${
+                                  isSel
+                                    ? "border-[#0F766E] bg-white font-bold"
+                                    : "border-[#132A2E]/10 bg-white/60"
+                                }`}
+                              >
+                                <span className="truncate">{srv.name}</span>
+                                <span className="shrink-0 text-[11px] text-[#0F766E]">
+                                  {formatVnd(srv.price)}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAssistGuestPets((prev) => [
+                          ...prev,
+                          {
+                            key: `gp-${Date.now()}`,
+                            name: "",
+                            species: "CAT",
+                            breed: "",
+                            serviceIds: services[0] ? [services[0].id] : [],
+                          },
+                        ])
+                      }
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#0F766E] hover:underline"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Thêm thú cưng khác vào phiếu
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold">Ngày hẹn</label>
+                    <input
+                      type="date"
+                      value={assistDate}
+                      onChange={(e) => setAssistDate(e.target.value)}
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold">Bác sĩ</label>
+                    <select
+                      value={assistDoctorId}
+                      onChange={(e) => setAssistDoctorId(e.target.value)}
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-bold"
+                    >
+                      <option value="AUTO">Phòng khám tự phân công (ít lịch nhất)</option>
+                      {doctors.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-xs">
+                    <span className="font-bold">
+                      Chọn khung giờ còn trống (khóa {assistLockedDuration} phút liên tiếp):
+                    </span>
+                    <span className="text-[#476268]">
+                      {assistLoadingSlots ? "Đang tải..." : "Xanh = còn trống"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-7 gap-2">
+                    {assistSlots.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        disabled={!slot.available}
+                        onClick={() => setAssistTime(slot.time)}
+                        title={slot.reason || "Còn trống"}
+                        className={`rounded-xl border px-2 py-2 text-xs font-bold ${
+                          assistTime === slot.time
+                            ? "border-[#F97316] bg-[#F97316] text-white"
+                            : slot.available
+                            ? "border-[#0F766E]/25 bg-white text-[#132A2E] hover:bg-[#0F766E]/8"
+                            : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through"
+                        }`}
+                      >
+                        {slot.time}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <input
+                  value={assistNotes}
+                  onChange={(e) => setAssistNotes(e.target.value)}
+                  placeholder="Ghi chú thêm (tùy chọn)..."
+                  className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm"
+                />
+
+                <div className="flex justify-end gap-2 border-t border-[#132A2E]/10 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setAssistBookingOpen(false)}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold"
+                  >
+                    Đóng
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={assistSubmitting}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F766E] px-5 py-2.5 text-xs font-extrabold text-white hover:bg-[#0B5D56]"
+                  >
+                    <CalendarPlus className="h-4 w-4" />
+                    {assistSubmitting ? "Đang tạo lịch..." : "Xác nhận Tạo đặt lịch hộ"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* DANH SÁCH LỊCH HẸN TRONG NGÀY (TÔ ĐỎ QUÁ 20 PHÚT) */}
           <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-extrabold text-[#132A2E]">
-                  Lịch hẹn trong ngày ({date})
+                  Bảng quản lý Tổng lịch đặt ({date})
                 </h2>
                 <p className="text-xs text-[#476268]">
                   Dòng tô <strong className="text-rose-600">Màu Đỏ</strong> là lịch hẹn đã quá 20 phút mà khách chưa Check-in.
                 </p>
               </div>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm font-bold"
-              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={openAssistBookingModal}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F766E] px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-[#0B5D56]"
+                >
+                  <CalendarPlus className="h-4 w-4" />
+                  + Tạo đặt lịch hộ
+                </button>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm font-bold"
+                />
+              </div>
             </div>
 
             <div className="mt-4 overflow-x-auto">
@@ -890,88 +1741,135 @@ export function ReceptionPortalClient() {
                     <th className="py-3 pr-3">Mã / Giờ</th>
                     <th className="py-3 pr-3">Khách hàng</th>
                     <th className="py-3 pr-3">Thú cưng & Dịch vụ</th>
-                    <th className="py-3 pr-3">Bác sĩ</th>
+                    <th className="py-3 pr-3">Bác sĩ (Đổi nhanh)</th>
                     <th className="py-3 pr-3">Trạng thái</th>
                     <th className="py-3 text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#132A2E]/8">
-                  {bookings.map((b) => (
-                    <tr
-                      key={b.id}
-                      className={
-                        b.isLate20Min
-                          ? "bg-rose-50 text-rose-950"
-                          : "hover:bg-[#FAF9F6]"
-                      }
-                    >
-                      <td className="py-3.5 pr-3">
-                        <span className="font-mono font-extrabold text-[#0F766E]">
-                          {b.bookingCode}
-                        </span>
-                        <p className="text-xs font-bold">
-                          {b.startTime} – {b.endTime}
-                        </p>
-                        {b.isLate20Min && (
-                          <span className="mt-1 inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                            TRỄ QUÁ 20 PHÚT
+                  {bookings.map((b) => {
+                    const st = formatBookingStatus(b.status);
+                    const canModify = b.status === "CONFIRMED" || b.status === "CHECKED_IN";
+                    return (
+                      <tr
+                        key={b.id}
+                        className={
+                          b.isLate20Min
+                            ? "bg-rose-50 text-rose-950"
+                            : "hover:bg-[#FAF9F6]"
+                        }
+                      >
+                        <td className="py-3.5 pr-3">
+                          <span className="font-mono font-extrabold text-[#0F766E]">
+                            {b.bookingCode}
                           </span>
-                        )}
-                        {b.isEmergency && (
-                          <span className="mt-1 inline-block rounded bg-rose-700 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                            CẤP CỨU
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 pr-3">
-                        <p className="font-bold">
-                          {b.isGuest ? b.guestName : b.customer?.fullName}
-                        </p>
-                        <p className="text-xs text-[#476268]">
-                          {b.isGuest ? `${b.guestPhone} (Vãng lai)` : b.customer?.phone}
-                        </p>
-                      </td>
-                      <td className="py-3.5 pr-3 text-xs">
-                        {b.pets.map((p) => (
-                          <div key={p.id} className="mb-1">
-                            <strong>
-                              {p.pet ? p.pet.name : p.guestPetName} (
-                              {formatSpecies(p.pet ? p.pet.species : p.guestPetSpecies || "DOG")})
-                            </strong>
-                            :{" "}
-                            {p.services.map((s) => s.serviceName).join(", ")}
-                          </div>
-                        ))}
-                      </td>
-                      <td className="py-3.5 pr-3 text-xs font-bold">
-                        {b.doctor?.fullName || "Chưa gán"}
-                      </td>
-                      <td className="py-3.5 pr-3 text-xs font-bold">{b.status}</td>
-                      <td className="py-3.5 text-right">
-                        {b.status === "CONFIRMED" && (
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => handleCheckIn(b.id)}
-                              className="rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                          <p className="text-xs font-bold">
+                            {b.startTime} – {b.endTime}
+                          </p>
+                          {b.isLate20Min && (
+                            <span className="mt-1 inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                              TRỄ QUÁ 20 PHÚT
+                            </span>
+                          )}
+                          {b.isEmergency && (
+                            <span className="mt-1 inline-block rounded bg-rose-700 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                              CẤP CỨU
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 pr-3">
+                          <p className="font-bold">
+                            {b.isGuest ? b.guestName : b.customer?.fullName}
+                          </p>
+                          <p className="text-xs text-[#476268]">
+                            {b.isGuest
+                              ? `${b.guestPhone} (Vãng lai)`
+                              : `${b.customer?.phone || "—"} (Thành viên)`}
+                          </p>
+                        </td>
+                        <td className="py-3.5 pr-3 text-xs">
+                          {b.pets.map((p) => (
+                            <div key={p.id} className="mb-1">
+                              <strong>
+                                {p.pet ? p.pet.name : p.guestPetName} (
+                                {formatSpecies(
+                                  p.pet ? p.pet.species : p.guestPetSpecies || "DOG"
+                                )}
+                                )
+                              </strong>
+                              : {p.services.map((s) => s.serviceName).join(", ")}
+                            </div>
+                          ))}
+                        </td>
+                        <td className="py-3.5 pr-3 text-xs font-bold">
+                          {canModify ? (
+                            <select
+                              value={b.doctorId || ""}
+                              onChange={(e) => handleReassignDoctor(b.id, e.target.value)}
+                              className="rounded-lg border border-[#132A2E]/15 bg-white px-2.5 py-1.5 text-xs font-bold text-[#132A2E]"
                             >
-                              Khách đã đến
-                            </button>
-                            <button
-                              onClick={() => handleRescheduleTime(b.id)}
-                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold"
-                            >
-                              Dời giờ
-                            </button>
-                          </div>
-                        )}
-                        {b.status === "CHECKED_IN" && (
-                          <span className="text-xs font-bold text-blue-700">
-                            Đã vào hàng chờ BS
+                              <option value="" disabled>
+                                Chọn bác sĩ...
+                              </option>
+                              {doctors.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.fullName}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            b.doctor?.fullName || "Chưa gán"
+                          )}
+                        </td>
+                        <td className="py-3.5 pr-3 text-xs font-bold">
+                          <span
+                            className={`inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${st.colorClass}`}
+                          >
+                            {st.label}
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-3.5 text-right">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {b.status === "CONFIRMED" && (
+                              <button
+                                onClick={() => handleCheckIn(b.id)}
+                                className="rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                              >
+                                Khách đã đến
+                              </button>
+                            )}
+                            {canModify && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    openRescheduleModal({
+                                      id: b.id,
+                                      bookingCode: b.bookingCode,
+                                      bookingDate: b.bookingDate,
+                                      startTime: b.startTime,
+                                      doctorId: b.doctorId,
+                                    })
+                                  }
+                                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold hover:bg-slate-50"
+                                >
+                                  Dời giờ
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    handleCancelBookingStaff(b.id, b.bookingCode)
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                  Hủy lịch
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {bookings.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-8 text-center text-sm text-[#476268]">
@@ -983,6 +1881,41 @@ export function ReceptionPortalClient() {
               </table>
             </div>
           </div>
+
+          {/* DANH SÁCH CẦN NHẮC HẸN TÁI KHÁM / TIÊM PHÒNG (7 NGÀY TỚI) */}
+          {followUpRecords.length > 0 && (
+            <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-[#0F766E]">
+                <BellRing className="h-5 w-5" />
+                <h3 className="text-base font-extrabold text-[#132A2E]">
+                  Danh sách cần nhắc lịch Tái khám / Tiêm nhắc (7 ngày tới)
+                </h3>
+              </div>
+              <p className="mt-0.5 text-xs text-[#476268]">
+                Tự động ẩn toàn bộ thú cưng có trạng thái Đã mất.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                {followUpRecords.map((fu) => (
+                  <div
+                    key={fu.id}
+                    className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between font-bold text-amber-900">
+                      <span>
+                        🐾 {fu.pet?.name || fu.guestPetName} —{" "}
+                        {fu.customer?.fullName || fu.guestOwnerName}
+                      </span>
+                      <span>📅 {formatDateVn(fu.followUpDate)}</span>
+                    </div>
+                    <p className="mt-1 text-[#476268]">
+                      SĐT: <strong>{fu.customer?.phone || fu.guestOwnerPhone || "—"}</strong> •{" "}
+                      {fu.followUpNote || "Tái khám theo hẹn bác sĩ"} ({fu.doctor.fullName})
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1539,7 +2472,7 @@ export function ReceptionPortalClient() {
             </div>
             <button
               type="button"
-              onClick={() => setLunchBreakEnabled((v) => !v)}
+              onClick={handleToggleLunchBreak}
               className={`rounded-full px-5 py-2 text-xs font-extrabold transition ${
                 lunchBreakEnabled
                   ? "bg-[#F97316] text-white"

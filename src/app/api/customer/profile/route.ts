@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, setSessionCookie, UserRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
@@ -54,6 +54,14 @@ export async function PATCH(request: NextRequest) {
       address: true,
       role: true,
     },
+  });
+
+  // Đồng bộ lại cookie phiên để tiêu đề trang lập tức hiển thị tên mới
+  await setSessionCookie({
+    userId: updated.id,
+    email: updated.email,
+    fullName: updated.fullName,
+    role: updated.role as UserRole,
   });
 
   return NextResponse.json({ user: updated });

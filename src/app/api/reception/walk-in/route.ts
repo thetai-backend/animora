@@ -55,7 +55,12 @@ export async function POST(request: NextRequest) {
     now.getMinutes()
   ).padStart(2, "0")}`;
   const endTime = addMinutesToTime(startTime, service.durationMinutes);
-  const bookingCode = generateBookingCode();
+  let bookingCode = generateBookingCode();
+  for (let i = 0; i < 8; i++) {
+    const exists = await prisma.booking.findUnique({ where: { bookingCode } });
+    if (!exists) break;
+    bookingCode = generateBookingCode();
+  }
 
   // Tạo phiếu CHECKED_IN đẩy thẳng vào Hàng chờ khám của bác sĩ (chống trùng phiếu)
   const booking = await prisma.booking.create({

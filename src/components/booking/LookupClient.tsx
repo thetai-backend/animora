@@ -16,6 +16,7 @@ interface LookupBooking {
   totalDurationMinutes: number;
   status: string;
   notes: string | null;
+  cancelReason: string | null;
   customer: { fullName: string; phone: string | null } | null;
   doctor: { fullName: string; title: string | null } | null;
   pets: {
@@ -88,7 +89,11 @@ export function LookupClient({ initialCode }: { initialCode: string }) {
         setError(data.error || "Không thể hủy lịch");
       } else {
         setMessage(data.message);
-        setBooking({ ...booking, status: "CANCELLED" });
+        setBooking({
+          ...booking,
+          status: "CANCELLED",
+          cancelReason: "Khách tự hủy tại trang Tra cứu lịch",
+        });
       }
     } catch {
       setError("Lỗi kết nối máy chủ");
@@ -184,7 +189,7 @@ export function LookupClient({ initialCode }: { initialCode: string }) {
                   {STATUS_LABEL[booking.status]?.label || booking.status}
                 </span>
               </div>
-              <p className="mt-1.5 text-sm text-[#476268]">
+                <p className="mt-1.5 text-sm text-[#476268]">
                 Chủ nuôi:{" "}
                 <strong className="text-[#132A2E]">
                   {booking.isGuest ? booking.guestName : booking.customer?.fullName}
@@ -194,6 +199,11 @@ export function LookupClient({ initialCode }: { initialCode: string }) {
                   {booking.isGuest ? booking.guestPhone : booking.customer?.phone}
                 </strong>
               </p>
+              {booking.status === "CANCELLED" && booking.cancelReason && (
+                <p className="mt-1 text-xs font-semibold text-rose-700">
+                  Lý do hủy: {booking.cancelReason}
+                </p>
+              )}
             </div>
 
             {canCancel && (
