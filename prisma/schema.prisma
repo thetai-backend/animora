@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. NGƯỜI DÙNG & NHÂN SỰ (4 VAI TRÒ RBAC)
+// ==========================================
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  passwordHash    String?
+  googleId        String?  @unique
+  fullName        String
+  phone           String?
+  address         String?
+  // MANAGER | RECEPTIONIST | DOCTOR | CUSTOMER
+  role            String   @default("CUSTOMER")
+  // Xóa mềm nhân sự (Rule 12): false = Ngừng hoạt động, chặn đăng nhập nhưng giữ lịch sử
+  isActive        Boolean  @default(true)
+  emailVerified   Boolean  @default(false)
+
+  // Thông tin chuyên môn (dành cho Bác sĩ hiển thị trên Trang Quảng cáo & Điều phối)
+  avatarUrl       String?
+  title           String?
+  specialty       String?
+  experienceYears Int?
+  bio             String?
+  // AVAILABLE | IN_EXAM | OFF_DUTY (Rule 5)
+  workStatus      String   @default("AVAILABLE")
+
+  pets            Pet[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ==========================================
+// 2. MÃ OTP XÁC THỰC EMAIL
+// ==========================================
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  purpose   String   @default("REGISTER") // REGISTER | LOGIN
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email, code])
+}
+
+// ==========================================
+// 3. HỒ SƠ THÚ CƯNG (CHỈ DÀNH CHO KHÁCH CÓ TÀI KHOẢN)
+// ==========================================
+model Pet {
+  id                 String    @id @default(cuid())
+  ownerId            String
+  owner              User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name               String
+  species            String    // DOG | CAT | OTHER
+  breed              String?
+  birthDate          DateTime?
+  gender             String?   // MALE | FEMALE
+  isNeutered         Boolean   @default(false)
+  coatDescription    String?
+  microchipCode      String?
+  allergies          String?
+  vaccinationHistory String?
+  dewormingHistory   String?
+  // ALIVE | DECEASED (Rule 12: Đã mất sẽ tự dừng mọi email nhắc lịch)
+  status             String    @default("ALIVE")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+// ==========================================
+// 4. DỊCH VỤ & BẢNG GIÁ CỐ ĐỊNH (Y TẾ / SPA)
+// ==========================================
+model Service {
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  name             String
+  // MEDICAL | SPA
+  category         String
+  // Giá cố định VNĐ (Rule 7: không chia theo cân nặng)
+  price            Int
+  // Thời lượng ước tính (phút) để khóa slot 30p ở Giai đoạn 2
+  durationMinutes  Int      @default(30)
+  shortDescription String
+  // Các bước quy trình thực hiện (ngăn cách bằng dấu xuống dòng)
+  processSteps     String
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// ==========================================
+// 5. SẢN PHẨM TẠI SHOP & KHO HỢP NHẤT
+// ==========================================
+model Product {
+  id                  String   @id @default(cuid())
+  slug                String   @unique
+  sku                 String   @unique
+  name                String
+  brand               String
+  // SHOP | MEDICINE | SUPPLY (Rule 10)
+  group               String   @default("SHOP")
+  // Thức ăn dinh dưỡng | Sữa tắm & Chăm sóc | Thực phẩm bổ sung | Phụ kiện
+  category            String
+  // DOG | CAT | BOTH
+  targetSpecies       String
+  price               Int
+  // Quy đổi đơn vị nhập -> bán lẻ (Rule 10)
+  importUnit          String   @default("Thùng")
+  retailUnit          String   @default("Gói")
+  conversionRate      Int      @default(1)
+  stockQuantity       Int      @default(0)
+  imageUrl            String
+  shortDescription    String
+  // Mô tả chuyên sâu cho Trang Quảng cáo (Rule 2: chỉ tham khảo mua tại quầy)
+  ingredients         String
+  benefits            String
+  suitableFor         String
+  usageInstructions   String
+  storageInstructions String
+  isFeaturedOnWeb     Boolean  @default(true)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ==========================================
+// 6. SỰ KIỆN & CHƯƠNG TRÌNH ƯU ĐÃI
+// ==========================================
+model Promotion {
+  id              String   @id @default(cuid())
+  code            String?  @unique
+  title           String
+  subtitle        String?
+  description     String
+  // PERCENT | FIXED
+  discountType    String
+  discountValue   Int
+  // ALL | MEDICAL | SPA | SHOP
+  applicableScope String   @default("ALL")
+  badgeText       String?
+  startDate       DateTime
+  endDate         DateTime
+  showOnLanding   Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ==========================================
+// 7. CÀI ĐẶT PHÒNG KHÁM & CMS CƠ BẢN
+// ==========================================
+model ClinicSettings {
+  id                  String   @id @default("default")
+  clinicName          String   @default("Phòng khám Thú y ANIMORA")
+  tagline             String
+  heroTitle           String
+  heroSubtitle        String
+  address             String
+  phone               String
+  email               String
+  openTime            String   @default("07:00")
+  closeTime           String   @default("20:00")
+  slotDurationMinutes Int      @default(30)
+  lunchBreakEnabled   Boolean  @default(false)
+  lunchStart          String   @default("12:00")
+  lunchEnd            String   @default("13:30")
+  googleMapsUrl       String
+  googleMapsEmbedUrl  String
+  latitude            Float?
+  longitude           Float?
+  bankCode            String?
+  bankAccountNumber   String?
+  bankAccountName     String?
+  updatedAt           DateTime @updatedAt
+}

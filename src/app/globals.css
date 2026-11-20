@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-primary: #0F766E;
+  --color-primary-dark: #0B5D56;
+  --color-primary-light: #CCFBF1;
+  --color-surface: #FAF9F6;
+  --color-surface-card: #FFFFFF;
+  --color-accent: #F97316;
+  --color-accent-hover: #EA580C;
+  --color-ink: #132A2E;
+  --color-ink-muted: #476268;
+  --font-heading: var(--font-plus-jakarta-sans), "Plus Jakarta Sans", sans-serif;
+  --font-body: var(--font-be-vietnam-pro), "Be Vietnam Pro", sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #FAF9F6;
+  color: #132A2E;
+  font-family: var(--font-be-vietnam-pro), "Be Vietnam Pro", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: var(--font-plus-jakarta-sans), "Plus Jakarta Sans", sans-serif;
+}
+
+/* Thanh cuộn tinh gọn phù hợp bảng màu ANIMORA */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F1EFEA;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #94B8B4;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0F766E;
+}
