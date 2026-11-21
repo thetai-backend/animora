@@ -306,9 +306,13 @@ export function ManagerRecordsTab({
                           <Lock className="h-3 w-3" />
                           Đã khóa cứng
                         </span>
-                      ) : (
+                      ) : r.status === "SENT_TO_POS" ? (
                         <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-bold text-amber-800">
-                          {r.status}
+                          Chờ thanh toán
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-blue-100 px-2.5 py-0.5 font-bold text-blue-800">
+                          Đang khám
                         </span>
                       )}
                     </td>

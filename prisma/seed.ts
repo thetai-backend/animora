@@ -655,6 +655,54 @@ async function main() {
       isFeaturedOnWeb: false,
     },
 
+    // --- HÀNG DÙNG CHUNG (SHARED: VỪA KÊ ĐƠN VỪA BÁN SHOP) ---
+    {
+      slug: "nexgard-spectra-nhai-phong-ve-ran-giun-tim",
+      sku: "DC-NEX-M",
+      name: "Viên nhai trị ve rận & giun tim NexGard Spectra (Chó 3.5–7.5kg)",
+      brand: "Boehringer Ingelheim",
+      group: "SHARED",
+      category: "Phòng trị ký sinh trùng",
+      targetSpecies: "DOG",
+      price: 245000,
+      importUnit: "Hộp",
+      retailUnit: "Viên",
+      conversionRate: 3,
+      stockQuantity: 12,
+      imageUrl: "/images/product-care.jpg",
+      shortDescription:
+        "Viên nhai vị thịt bò phòng và trị toàn diện ve, bọ chét, ghẻ Demodex, giun đũa, giun móc và giun tim hàng tháng.",
+      ingredients: "Afoxolaner 18.75mg, Milbemycin oxime 3.75mg.",
+      benefits: "• Bảo vệ toàn diện nội & ngoại ký sinh trùng 30 ngày.\n• Vừa kê đơn phòng bệnh vừa bán lẻ trực tiếp tại Shop.",
+      suitableFor: "Chó từ 8 tuần tuổi, cân nặng 3.5–7.5kg.",
+      usageInstructions: "Cho nhai trực tiếp 1 viên/tháng theo cân nặng.",
+      storageInstructions: "Nơi khô thoáng dưới 30°C.",
+      isFeaturedOnWeb: true,
+    },
+    {
+      slug: "gel-dinh-duong-nutri-plus-gel-120g",
+      sku: "DC-NUT-GEL",
+      name: "Gel dinh dưỡng phục hồi Nutri-Plus Gel (Tuýp 120g)",
+      brand: "Virbac (Pháp)",
+      group: "SHARED",
+      category: "Dinh dưỡng & Phục hồi",
+      targetSpecies: "BOTH",
+      price: 215000,
+      importUnit: "Thùng",
+      retailUnit: "Tuýp",
+      conversionRate: 12,
+      stockQuantity: 0, // Tồn kho = 0 để test cảnh báo đỏ khi kê đơn & bán Shop
+      imageUrl: "/images/product-food.jpg",
+      shortDescription:
+        "Gel bổ sung năng lượng, vitamin và khoáng chất đậm đặc cho chó mèo biếng ăn, sau ốm hoặc mới phẫu thuật.",
+      ingredients: "Dầu đậu nành, mật mía, dầu gan cá tuyết, Vitamin A, D3, E, B1, B6, B12, Sắt, Mangan.",
+      benefits: "• Bù năng lượng tức thì cho bé bỏ ăn.\n• Kích thích vị giác, hỗ trợ phục hồi nhanh.",
+      suitableFor: "Chó mèo suy nhược, mang thai, cho con bú hoặc sau điều trị.",
+      usageInstructions: "1–2 muỗng cà phê cho mỗi 5kg thể trọng/ngày.",
+      storageInstructions: "Đậy kín nắp, để nơi mát dưới 25°C.",
+      isFeaturedOnWeb: true,
+    },
+
     // --- VẬT TƯ TIÊU HAO (SUPPLY) ---
     {
       slug: "kim-tiem-1ml-vo-trung",
@@ -706,7 +754,7 @@ async function main() {
   for (const prod of productsData) {
     const saved = await prisma.product.upsert({
       where: { slug: prod.slug },
-      update: { stockQuantity: prod.stockQuantity },
+      update: {},
       create: prod,
     });
     productMap[prod.sku] = saved;
@@ -717,6 +765,7 @@ async function main() {
   // ==========================================
   const now = new Date();
   const in12Days = new Date(now.getTime() + 12 * 24 * 60 * 60 * 1000); // < 30 ngày -> Cảnh báo ĐỎ!
+  const in18Days = new Date(now.getTime() + 18 * 24 * 60 * 60 * 1000); // < 30 ngày -> Cảnh báo ĐỎ!
   const in22Days = new Date(now.getTime() + 22 * 24 * 60 * 60 * 1000); // < 30 ngày -> Cảnh báo ĐỎ!
   const in180Days = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
   const in365Days = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
@@ -724,6 +773,27 @@ async function main() {
   const existingBatches = await prisma.inventoryBatch.count();
   if (existingBatches === 0) {
     const batchSeeds = [
+      // Hàng dùng chung NexGard Spectra: 2 lô (1 lô < 30 ngày + 1 lô mới) để test FEFO!
+      {
+        sku: "DC-NEX-M",
+        batchNumber: "NEX-26A8",
+        expiryDate: in18Days,
+        importedPackages: 1,
+        conversionRate: 3,
+        initialQuantity: 3,
+        remainingQuantity: 3,
+        importNote: "Lô cận date (< 30 ngày) — ưu tiên trừ trước FEFO",
+      },
+      {
+        sku: "DC-NEX-M",
+        batchNumber: "NEX-27C1",
+        expiryDate: in365Days,
+        importedPackages: 3,
+        conversionRate: 3,
+        initialQuantity: 9,
+        remainingQuantity: 9,
+        importNote: "Lô nhập mới hàng dùng chung Shop & Phòng khám",
+      },
       // Kháng sinh Amoxicillin: 1 lô sắp hết hạn (12 ngày) + 1 lô mới (365 ngày) -> test FEFO!
       {
         sku: "TH-AMOX-250",
@@ -899,6 +969,61 @@ async function main() {
         createdByName: manager.fullName,
       },
     });
+  } else if (productMap["DC-NEX-M"]) {
+    // Đảm bảo lô hàng dùng chung NexGard cũng tồn tại nếu DB đã seed trước đó
+    const nexBatchCount = await prisma.inventoryBatch.count({
+      where: { productId: productMap["DC-NEX-M"].id },
+    });
+    if (nexBatchCount === 0) {
+      const b1 = await prisma.inventoryBatch.create({
+        data: {
+          productId: productMap["DC-NEX-M"].id,
+          batchNumber: "NEX-26A8",
+          expiryDate: in18Days,
+          importedPackages: 1,
+          conversionRate: 3,
+          initialQuantity: 3,
+          remainingQuantity: 3,
+          importNote: "Lô cận date (< 30 ngày) — ưu tiên trừ trước FEFO",
+          createdById: manager.id,
+        },
+      });
+      const b2 = await prisma.inventoryBatch.create({
+        data: {
+          productId: productMap["DC-NEX-M"].id,
+          batchNumber: "NEX-27C1",
+          expiryDate: in365Days,
+          importedPackages: 3,
+          conversionRate: 3,
+          initialQuantity: 9,
+          remainingQuantity: 9,
+          importNote: "Lô nhập mới hàng dùng chung Shop & Phòng khám",
+          createdById: manager.id,
+        },
+      });
+      await prisma.stockTransaction.createMany({
+        data: [
+          {
+            productId: productMap["DC-NEX-M"].id,
+            batchId: b1.id,
+            type: "IMPORT",
+            quantityChange: 3,
+            note: "Nhập 1 Hộp (3 Viên) - Lô NEX-26A8",
+            createdById: manager.id,
+            createdByName: manager.fullName,
+          },
+          {
+            productId: productMap["DC-NEX-M"].id,
+            batchId: b2.id,
+            type: "IMPORT",
+            quantityChange: 9,
+            note: "Nhập 3 Hộp (9 Viên) - Lô NEX-27C1",
+            createdById: manager.id,
+            createdByName: manager.fullName,
+          },
+        ],
+      });
+    }
   }
 
   // ==========================================
@@ -1194,6 +1319,7 @@ async function main() {
         followUpDate: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000),
         followUpNote: "Kiểm tra lại cân nặng và tiêm nhắc phòng dại định kỳ",
         status: "LOCKED",
+        isLocked: true,
         lockedAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
       },
     });

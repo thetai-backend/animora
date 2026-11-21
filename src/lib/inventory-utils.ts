@@ -1,4 +1,7 @@
+import { Prisma } from ".prisma/client-animora";
 import { prisma } from "@/lib/prisma";
+
+type DbClient = Prisma.TransactionClient | typeof prisma;
 
 export function isExpiringWithin30Days(expiryDate: Date | string): boolean {
   const exp = typeof expiryDate === "string" ? new Date(expiryDate) : expiryDate;
@@ -11,9 +14,16 @@ export function daysUntilExpiry(expiryDate: Date | string): number {
   return Math.ceil((exp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
+export interface DeductedBatchDetail {
+  batchId: string | null;
+  batchNumber: string | null;
+  quantity: number;
+}
+
 /**
  * Cơ chế trừ kho FEFO (First Expired, First Out) - Rule 10:
  * - Ưu tiên trừ các lô còn hàng có expiryDate gần nhất trước.
+ * - Hỗ trợ chạy trong Prisma Transaction (tx) để đảm bảo tính nguyên tử.
  * - Nếu tồn kho = 0 hoặc không đủ, VẪN CHO PHÉP trừ (tồn kho âm tạm thời) và trả về cảnh báo.
  */
 export async function deductStockFEFO(params: {
@@ -24,34 +34,42 @@ export async function deductStockFEFO(params: {
   note: string;
   actorId?: string;
   actorName?: string;
-}): Promise<{ wentNegative: boolean; newStockQuantity: number }> {
+  tx?: DbClient;
+}): Promise<{
+  wentNegative: boolean;
+  newStockQuantity: number;
+  deductedBatches: DeductedBatchDetail[];
+}> {
   const { productId, quantity, type, referenceId, note, actorId, actorName } = params;
+  const db: DbClient = params.tx ?? prisma;
+
   if (quantity <= 0) {
-    const p = await prisma.product.findUnique({ where: { id: productId } });
-    return { wentNegative: false, newStockQuantity: p?.stockQuantity ?? 0 };
+    const p = await db.product.findUnique({ where: { id: productId } });
+    return { wentNegative: false, newStockQuantity: p?.stockQuantity ?? 0, deductedBatches: [] };
   }
 
   let remainingToDeduct = quantity;
+  const deductedBatches: DeductedBatchDetail[] = [];
 
   // Lấy các lô còn hàng theo hạn sử dụng gần nhất (FEFO)
-  const batches = await prisma.inventoryBatch.findMany({
+  const batches = await db.inventoryBatch.findMany({
     where: {
       productId,
       remainingQuantity: { gt: 0 },
     },
-    orderBy: { expiryDate: "asc" },
+    orderBy: [{ expiryDate: "asc" }, { createdAt: "asc" }],
   });
 
   for (const batch of batches) {
     if (remainingToDeduct <= 0) break;
     const take = Math.min(batch.remainingQuantity, remainingToDeduct);
 
-    await prisma.inventoryBatch.update({
+    await db.inventoryBatch.update({
       where: { id: batch.id },
       data: { remainingQuantity: { decrement: take } },
     });
 
-    await prisma.stockTransaction.create({
+    await db.stockTransaction.create({
       data: {
         productId,
         batchId: batch.id,
@@ -64,12 +82,18 @@ export async function deductStockFEFO(params: {
       },
     });
 
+    deductedBatches.push({
+      batchId: batch.id,
+      batchNumber: batch.batchNumber,
+      quantity: take,
+    });
+
     remainingToDeduct -= take;
   }
 
   // Nếu vẫn còn thiếu (tồn kho = 0 / bán âm tạm thời) -> ghi nhận giao dịch tồn âm
   if (remainingToDeduct > 0) {
-    await prisma.stockTransaction.create({
+    await db.stockTransaction.create({
       data: {
         productId,
         batchId: null,
@@ -81,9 +105,15 @@ export async function deductStockFEFO(params: {
         createdByName: actorName,
       },
     });
+
+    deductedBatches.push({
+      batchId: null,
+      batchNumber: null,
+      quantity: remainingToDeduct,
+    });
   }
 
-  const updatedProduct = await prisma.product.update({
+  const updatedProduct = await db.product.update({
     where: { id: productId },
     data: { stockQuantity: { decrement: quantity } },
   });
@@ -91,6 +121,7 @@ export async function deductStockFEFO(params: {
   return {
     wentNegative: updatedProduct.stockQuantity < 0 || remainingToDeduct > 0,
     newStockQuantity: updatedProduct.stockQuantity,
+    deductedBatches,
   };
 }
 
@@ -103,10 +134,12 @@ export async function restoreStockFromInvoiceCancel(params: {
   reason: string;
   actorId: string;
   actorName: string;
+  tx?: DbClient;
 }): Promise<{ restoredCount: number; restoredDetails: string[] }> {
   const { invoiceId, invoiceCode, reason, actorId, actorName } = params;
+  const db: DbClient = params.tx ?? prisma;
 
-  const saleTxs = await prisma.stockTransaction.findMany({
+  const saleTxs = await db.stockTransaction.findMany({
     where: {
       referenceId: invoiceId,
       type: "SALE_DEDUCT",
@@ -120,34 +153,34 @@ export async function restoreStockFromInvoiceCancel(params: {
   const restoredDetails: string[] = [];
   let restoredCount = 0;
 
-  for (const tx of saleTxs) {
-    const qtyToRestore = Math.abs(tx.quantityChange);
+  for (const txRow of saleTxs) {
+    const qtyToRestore = Math.abs(txRow.quantityChange);
     if (qtyToRestore <= 0) continue;
 
-    if (tx.batchId) {
-      const batch = await prisma.inventoryBatch.findUnique({ where: { id: tx.batchId } });
+    if (txRow.batchId) {
+      const batch = await db.inventoryBatch.findUnique({ where: { id: txRow.batchId } });
       if (batch) {
-        await prisma.inventoryBatch.update({
+        await db.inventoryBatch.update({
           where: { id: batch.id },
           data: { remainingQuantity: { increment: qtyToRestore } },
         });
       }
     }
 
-    await prisma.product.update({
-      where: { id: tx.productId },
+    await db.product.update({
+      where: { id: txRow.productId },
       data: { stockQuantity: { increment: qtyToRestore } },
     });
 
-    await prisma.stockTransaction.create({
+    await db.stockTransaction.create({
       data: {
-        productId: tx.productId,
-        batchId: tx.batchId,
+        productId: txRow.productId,
+        batchId: txRow.batchId,
         type: "RETURN",
         quantityChange: qtyToRestore,
         referenceId: invoiceId,
         note: `Hoàn kho hủy hóa đơn ${invoiceCode}${
-          tx.batch ? ` (Lô ${tx.batch.batchNumber})` : " (Bù tồn âm)"
+          txRow.batch ? ` (Lô ${txRow.batch.batchNumber})` : " (Bù tồn âm)"
         } — Lý do: ${reason}`,
         createdById: actorId,
         createdByName: actorName,
@@ -156,8 +189,8 @@ export async function restoreStockFromInvoiceCancel(params: {
 
     restoredCount += qtyToRestore;
     restoredDetails.push(
-      `+${qtyToRestore} ${tx.product.retailUnit} ${tx.product.name}${
-        tx.batch ? ` (Lô ${tx.batch.batchNumber})` : ""
+      `+${qtyToRestore} ${txRow.product.retailUnit} ${txRow.product.name}${
+        txRow.batch ? ` (Lô ${txRow.batch.batchNumber})` : ""
       }`
     );
   }

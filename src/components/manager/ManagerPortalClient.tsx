@@ -19,6 +19,7 @@ import {
   type BatchItem,
   type InventoryProduct,
   type SlipItem,
+  type StockTransactionItem,
 } from "./ManagerInventoryTab";
 import {
   ManagerInvoicesTab,
@@ -63,6 +64,7 @@ export function ManagerPortalClient() {
   const [negativeStockProducts, setNegativeStockProducts] = useState<InventoryProduct[]>([]);
   const [internalSlips, setInternalSlips] = useState<SlipItem[]>([]);
   const [disposalSlips, setDisposalSlips] = useState<SlipItem[]>([]);
+  const [transactions, setTransactions] = useState<StockTransactionItem[]>([]);
 
   // Records & Invoices
   const [records, setRecords] = useState<ManagerMedicalRecord[]>([]);
@@ -101,6 +103,7 @@ export function ManagerPortalClient() {
     setNegativeStockProducts(invRes.negativeStockProducts || []);
     setInternalSlips(invRes.internalSlips || []);
     setDisposalSlips(invRes.disposalSlips || []);
+    setTransactions(invRes.transactions || []);
 
     setRecords(recRes.medicalRecords || []);
     setInvoices(recRes.invoices || []);
@@ -201,6 +204,7 @@ export function ManagerPortalClient() {
           negativeStockProducts={negativeStockProducts}
           internalSlips={internalSlips}
           disposalSlips={disposalSlips}
+          transactions={transactions}
           onReload={loadAll}
           notify={notify}
         />

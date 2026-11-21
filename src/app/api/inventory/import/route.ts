@@ -31,36 +31,40 @@ export async function POST(request: NextRequest) {
   const conversionRate = Math.max(1, product.conversionRate);
   const convertedRetailQty = importedPackages * conversionRate;
 
-  const batch = await prisma.inventoryBatch.create({
-    data: {
-      productId: product.id,
-      batchNumber,
-      expiryDate: new Date(expiryDateStr),
-      importedPackages,
-      conversionRate,
-      initialQuantity: convertedRetailQty,
-      remainingQuantity: convertedRetailQty,
-      importNote,
-      createdById: session.userId,
-    },
-  });
+  const batch = await prisma.$transaction(async (tx) => {
+    const created = await tx.inventoryBatch.create({
+      data: {
+        productId: product.id,
+        batchNumber,
+        expiryDate: new Date(expiryDateStr),
+        importedPackages,
+        conversionRate,
+        initialQuantity: convertedRetailQty,
+        remainingQuantity: convertedRetailQty,
+        importNote,
+        createdById: session.userId,
+      },
+    });
 
-  await prisma.product.update({
-    where: { id: product.id },
-    data: { stockQuantity: { increment: convertedRetailQty } },
-  });
+    await tx.product.update({
+      where: { id: product.id },
+      data: { stockQuantity: { increment: convertedRetailQty } },
+    });
 
-  await prisma.stockTransaction.create({
-    data: {
-      productId: product.id,
-      batchId: batch.id,
-      type: "IMPORT",
-      quantityChange: convertedRetailQty,
-      referenceId: batch.id,
-      note: `Nhập ${importedPackages} ${product.importUnit} (quy đổi ${convertedRetailQty} ${product.retailUnit}) — Lô ${batchNumber}`,
-      createdById: session.userId,
-      createdByName: session.fullName,
-    },
+    await tx.stockTransaction.create({
+      data: {
+        productId: product.id,
+        batchId: created.id,
+        type: "IMPORT",
+        quantityChange: convertedRetailQty,
+        referenceId: created.id,
+        note: `Nhập ${importedPackages} ${product.importUnit} (quy đổi ${convertedRetailQty} ${product.retailUnit}) — Lô ${batchNumber}`,
+        createdById: session.userId,
+        createdByName: session.fullName,
+      },
+    });
+
+    return created;
   });
 
   return NextResponse.json(

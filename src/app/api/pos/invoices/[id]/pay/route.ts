@@ -5,11 +5,11 @@ import { calculateInvoiceTotals } from "@/lib/pricing-utils";
 import { deductStockFEFO } from "@/lib/inventory-utils";
 
 /**
- * Xác nhận đã thu tại quầy POS:
+ * Xác nhận đã thu tại quầy POS (Xử lý nguyên tử trong 1 Prisma Transaction):
  * 1) Tính cộng dồn đa khuyến mãi (Sự kiện trước -> Mã giảm giá sau, min 0đ).
  * 2) Chỉ chấp nhận 1 trong 2 phương thức: CASH hoặc VIETQR (không hỗn hợp).
  * 3) Trừ kho FEFO CHỈ KHI bấm Xác nhận đã thu (cho phép tồn âm tạm thời kèm cảnh báo).
- * 4) KHÓA CỨNG bệnh án S.O.A.P gốc ngay khi thanh toán xong!
+ * 4) KHÓA CỨNG bệnh án S.O.A.P gốc (isLocked = true, status = LOCKED) và cập nhật lịch hẹn hoàn thành.
  */
 export async function POST(
   request: NextRequest,
@@ -104,70 +104,123 @@ export async function POST(
     cashChange = cashReceived - totals.totalAmount;
   }
 
-  // Trừ tồn kho FEFO cho toàn bộ Thuốc & Sản phẩm Shop trong hóa đơn
-  const negativeStockWarnings: string[] = [];
-  for (const item of invoice.items) {
-    if (item.productId && (item.itemType === "MEDICINE" || item.itemType === "SHOP_PRODUCT")) {
-      const res = await deductStockFEFO({
-        productId: item.productId,
-        quantity: item.quantity,
-        type: "SALE_DEDUCT",
-        referenceId: invoice.id,
-        note: `Xuất bán hóa đơn ${invoice.invoiceCode}`,
-        actorId: session.userId,
-        actorName: session.fullName,
-      });
-      if (res.wentNegative) {
-        negativeStockWarnings.push(
-          `${item.name} (tồn kho tạm thời: ${res.newStockQuantity} ${item.unit})`
-        );
-      }
-    }
-  }
-
   const paidAt = new Date();
-  const updatedInvoice = await prisma.invoice.update({
-    where: { id: invoice.id },
-    data: {
-      cashierId: session.userId,
-      subtotal: totals.subtotal,
-      eventDiscountAmount: totals.eventDiscountAmount,
-      couponDiscountAmount: totals.couponDiscountAmount,
-      totalAmount: totals.totalAmount,
-      appliedEventPromoId: eventPromo?.id ?? null,
-      appliedEventPromoTitle: eventPromo?.title ?? null,
-      appliedCouponCode: couponPromo?.code ?? null,
-      appliedCouponTitle: couponPromo?.title ?? null,
-      paymentMethod,
-      cashReceived,
-      cashChange,
-      status: "PAID",
-      paidAt,
-    },
-    include: {
-      items: true,
-      auditLogs: true,
-      medicalRecord: { select: { id: true, recordCode: true, status: true } },
-    },
-  });
+  const negativeStockWarnings: string[] = [];
 
-  // Rule 6: Ngay khi hóa đơn được xác nhận thanh toán -> KHÓA CỨNG bệnh án S.O.A.P gốc!
-  if (invoice.medicalRecordId) {
-    await prisma.medicalRecord.update({
-      where: { id: invoice.medicalRecordId },
-      data: {
-        status: "LOCKED",
-        lockedAt: paidAt,
-      },
+  try {
+    const updatedInvoice = await prisma.$transaction(async (tx) => {
+      // Kiểm tra lại trạng thái trong transaction để chống thu trùng 2 lần
+      const fresh = await tx.invoice.findUnique({
+        where: { id: invoice.id },
+        include: { items: true },
+      });
+      if (!fresh || fresh.status !== "PENDING") {
+        throw new Error("INVOICE_ALREADY_PROCESSED");
+      }
+
+      // 1) Trừ tồn kho FEFO cho toàn bộ Thuốc & Sản phẩm Shop trong hóa đơn
+      for (const item of fresh.items) {
+        if (item.productId && (item.itemType === "MEDICINE" || item.itemType === "SHOP_PRODUCT")) {
+          const res = await deductStockFEFO({
+            productId: item.productId,
+            quantity: item.quantity,
+            type: "SALE_DEDUCT",
+            referenceId: fresh.id,
+            note: `Xuất bán hóa đơn ${fresh.invoiceCode}`,
+            actorId: session.userId,
+            actorName: session.fullName,
+            tx,
+          });
+          if (res.wentNegative) {
+            negativeStockWarnings.push(
+              `${item.name} (tồn kho tạm thời: ${res.newStockQuantity} ${item.unit})`
+            );
+          }
+        }
+      }
+
+      // 2) Cập nhật Hóa đơn thành PAID
+      const inv = await tx.invoice.update({
+        where: { id: fresh.id },
+        data: {
+          cashierId: session.userId,
+          subtotal: totals.subtotal,
+          eventDiscountAmount: totals.eventDiscountAmount,
+          couponDiscountAmount: totals.couponDiscountAmount,
+          totalAmount: totals.totalAmount,
+          appliedEventPromoId: eventPromo?.id ?? null,
+          appliedEventPromoTitle: eventPromo?.title ?? null,
+          appliedCouponCode:
+            couponPromo && couponPromo.id !== eventPromo?.id ? couponPromo.code : null,
+          appliedCouponTitle:
+            couponPromo && couponPromo.id !== eventPromo?.id ? couponPromo.title : null,
+          paymentMethod,
+          cashReceived,
+          cashChange,
+          status: "PAID",
+          paidAt,
+        },
+        include: {
+          items: true,
+          auditLogs: { orderBy: { createdAt: "desc" } },
+          medicalRecord: { select: { id: true, recordCode: true, status: true, isLocked: true } },
+        },
+      });
+
+      // 3) KHÓA CỨNG bệnh án S.O.A.P gốc ngay khi thanh toán
+      if (fresh.medicalRecordId) {
+        await tx.medicalRecord.update({
+          where: { id: fresh.medicalRecordId },
+          data: {
+            status: "LOCKED",
+            isLocked: true,
+            lockedAt: paidAt,
+          },
+        });
+      }
+
+      // 4) Đảm bảo lịch hẹn tương ứng đánh dấu COMPLETED nếu toàn bộ thú cưng đã khám xong
+      if (fresh.bookingId) {
+        const booking = await tx.booking.findUnique({
+          where: { id: fresh.bookingId },
+          include: {
+            pets: { select: { id: true } },
+            medicalRecords: { select: { bookingPetId: true, status: true } },
+          },
+        });
+        if (booking && booking.status !== "CANCELLED") {
+          const donePetIds = new Set(
+            booking.medicalRecords
+              .filter((r) => r.status === "SENT_TO_POS" || r.status === "LOCKED")
+              .map((r) => r.bookingPetId)
+          );
+          const allDone =
+            booking.pets.length <= 1 || booking.pets.every((p) => donePetIds.has(p.id));
+          if (allDone) {
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: { status: "COMPLETED" },
+            });
+          }
+        }
+      }
+
+      return inv;
     });
-  }
 
-  return NextResponse.json({
-    invoice: updatedInvoice,
-    negativeStockWarnings,
-    message:
-      negativeStockWarnings.length > 0
-        ? `Đã xác nhận thu tiền hóa đơn ${invoice.invoiceCode}, trừ kho FEFO và khóa cứng bệnh án. Lưu ý tồn kho âm tạm thời: ${negativeStockWarnings.join(", ")}.`
-        : `Đã xác nhận thu tiền hóa đơn ${invoice.invoiceCode}, trừ kho FEFO và khóa cứng bệnh án S.O.A.P thành công!`,
-  });
+    return NextResponse.json({
+      invoice: updatedInvoice,
+      negativeStockWarnings,
+      message:
+        negativeStockWarnings.length > 0
+          ? `Đã xác nhận thu tiền hóa đơn ${invoice.invoiceCode}, trừ kho FEFO và khóa cứng bệnh án. Lưu ý tồn kho âm tạm thời: ${negativeStockWarnings.join(", ")}.`
+          : `Đã xác nhận thu tiền hóa đơn ${invoice.invoiceCode}, trừ kho FEFO và khóa cứng bệnh án S.O.A.P thành công!`,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "INVOICE_ALREADY_PROCESSED") {
+      return NextResponse.json({ error: "Hóa đơn này đã được thanh toán trước đó" }, { status: 409 });
+    }
+    console.error("POS pay transaction error:", err);
+    return NextResponse.json({ error: "Lỗi xử lý giao dịch thanh toán" }, { status: 500 });
+  }
 }

@@ -70,7 +70,7 @@ export async function PATCH(
   }
 
   // Rule 6: Bệnh án đã thanh toán -> KHÓA CỨNG, cấm sửa đè!
-  if (existing.status === "LOCKED" || existing.invoice?.status === "PAID") {
+  if (existing.isLocked || existing.status === "LOCKED" || existing.invoice?.status === "PAID") {
     return NextResponse.json(
       {
         error:

@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const selectedDate = searchParams.get("date") || getTodayDateStr();
 
-  const [queueBookings, medicalRecords, leaves, services, products, internalSlips] =
+  const [queueBookings, medicalRecords, allRecords, leaves, services, products, internalSlips] =
     await Promise.all([
       prisma.booking.findMany({
         where: {
@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
       prisma.medicalRecord.findMany({
         where: { doctorId: doctorUser.id },
         include: {
+          doctor: { select: { id: true, fullName: true } },
           customer: { select: { id: true, fullName: true, phone: true } },
           pet: true,
           addendums: { orderBy: { createdAt: "asc" } },
@@ -65,6 +66,19 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { createdAt: "desc" },
         take: 30,
+      }),
+      prisma.medicalRecord.findMany({
+        include: {
+          doctor: { select: { id: true, fullName: true } },
+          customer: { select: { id: true, fullName: true, phone: true } },
+          pet: { select: { id: true, name: true, species: true, breed: true } },
+          addendums: { orderBy: { createdAt: "asc" } },
+          invoice: {
+            select: { invoiceCode: true, status: true, totalAmount: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
       }),
       prisma.doctorLeave.findMany({
         where: { doctorId: doctorUser.id },
@@ -103,6 +117,7 @@ export async function GET(request: NextRequest) {
     doctor: doctorUser,
     queueBookings,
     medicalRecords,
+    allRecords,
     leaves,
     services,
     products,

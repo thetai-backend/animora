@@ -354,6 +354,7 @@ model MedicalRecord {
 
   // IN_PROGRESS | SENT_TO_POS | LOCKED
   status           String                  @default("IN_PROGRESS")
+  isLocked         Boolean                 @default(false)
   lockedAt         DateTime?
 
   addendums        MedicalRecordAddendum[]

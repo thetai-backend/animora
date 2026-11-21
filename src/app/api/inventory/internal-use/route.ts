@@ -32,26 +32,40 @@ export async function POST(request: NextRequest) {
   }
 
   const slipCode = generateShortCode("XNB");
-  const slip = await prisma.internalUsageSlip.create({
-    data: {
-      slipCode,
+
+  const { slip, fefoResult } = await prisma.$transaction(async (tx) => {
+    const createdSlip = await tx.internalUsageSlip.create({
+      data: {
+        slipCode,
+        productId: product.id,
+        quantity,
+        department,
+        reason,
+        createdById: session.userId,
+        createdByName: session.fullName,
+      },
+    });
+
+    const res = await deductStockFEFO({
       productId: product.id,
       quantity,
-      department,
-      reason,
-      createdById: session.userId,
-      createdByName: session.fullName,
-    },
-  });
+      type: "INTERNAL_USE",
+      referenceId: createdSlip.id,
+      note: `Xuất kho nội bộ ${slipCode} (${department}): ${reason}`,
+      actorId: session.userId,
+      actorName: session.fullName,
+      tx,
+    });
 
-  const fefoResult = await deductStockFEFO({
-    productId: product.id,
-    quantity,
-    type: "INTERNAL_USE",
-    referenceId: slip.id,
-    note: `Xuất kho nội bộ ${slipCode} (${department}): ${reason}`,
-    actorId: session.userId,
-    actorName: session.fullName,
+    const firstBatchId = res.deductedBatches.find((b) => b.batchId)?.batchId ?? null;
+    if (firstBatchId) {
+      await tx.internalUsageSlip.update({
+        where: { id: createdSlip.id },
+        data: { batchId: firstBatchId },
+      });
+    }
+
+    return { slip: { ...createdSlip, batchId: firstBatchId }, fefoResult: res };
   });
 
   return NextResponse.json(

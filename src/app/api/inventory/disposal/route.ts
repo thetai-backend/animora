@@ -42,73 +42,106 @@ export async function POST(request: NextRequest) {
   const quantityChange = type === "DISPOSAL" ? -Math.abs(rawQuantity) : rawQuantity;
   const slipCode = generateShortCode(type === "DISPOSAL" ? "XH" : "KK");
 
-  let targetBatchId = batchId;
-  let targetBatchNumber: string | null = null;
-
-  if (targetBatchId) {
-    const batch = await prisma.inventoryBatch.findUnique({ where: { id: targetBatchId } });
-    if (batch) {
-      targetBatchNumber = batch.batchNumber;
-      await prisma.inventoryBatch.update({
-        where: { id: targetBatchId },
-        data: { remainingQuantity: Math.max(0, batch.remainingQuantity + quantityChange) },
-      });
-    } else {
-      targetBatchId = null;
+  if (batchId) {
+    const batchCheck = await prisma.inventoryBatch.findUnique({ where: { id: batchId } });
+    if (!batchCheck || batchCheck.productId !== product.id) {
+      return NextResponse.json({ error: "Không tìm thấy lô hàng hợp lệ" }, { status: 404 });
     }
-  } else if (quantityChange < 0) {
-    // Nếu không chọn lô cụ thể khi xuất hủy -> trừ theo lô gần hết hạn nhất (FEFO)
-    let left = Math.abs(quantityChange);
-    const batches = await prisma.inventoryBatch.findMany({
-      where: { productId: product.id, remainingQuantity: { gt: 0 } },
-      orderBy: { expiryDate: "asc" },
-    });
-    for (const b of batches) {
-      if (left <= 0) break;
-      const take = Math.min(b.remainingQuantity, left);
-      await prisma.inventoryBatch.update({
-        where: { id: b.id },
-        data: { remainingQuantity: { decrement: take } },
-      });
-      if (!targetBatchId) {
-        targetBatchId = b.id;
-        targetBatchNumber = b.batchNumber;
-      }
-      left -= take;
+    if (batchCheck.remainingQuantity + quantityChange < 0) {
+      return NextResponse.json(
+        {
+          error: `Lô ${batchCheck.batchNumber} chỉ còn ${batchCheck.remainingQuantity} ${product.retailUnit}, không thể trừ ${Math.abs(quantityChange)} ${product.retailUnit}.`,
+        },
+        { status: 400 }
+      );
     }
   }
 
-  const slip = await prisma.disposalSlip.create({
-    data: {
-      slipCode,
-      type,
-      productId: product.id,
-      batchId: targetBatchId,
-      quantityChange,
-      reason,
-      createdById: session.userId,
-      createdByName: session.fullName,
-    },
-  });
+  const { slip, targetBatchNumber } = await prisma.$transaction(async (tx) => {
+    let targetBatchId = batchId;
+    let batchNum: string | null = null;
 
-  await prisma.product.update({
-    where: { id: product.id },
-    data: { stockQuantity: { increment: quantityChange } },
-  });
+    if (targetBatchId) {
+      const batch = await tx.inventoryBatch.findUnique({ where: { id: targetBatchId } });
+      if (batch) {
+        batchNum = batch.batchNumber;
+        await tx.inventoryBatch.update({
+          where: { id: targetBatchId },
+          data: { remainingQuantity: { increment: quantityChange } },
+        });
+      } else {
+        targetBatchId = null;
+      }
+    } else if (quantityChange < 0) {
+      // Nếu không chọn lô cụ thể khi xuất hủy/giảm -> trừ theo lô gần hết hạn nhất (FEFO)
+      let left = Math.abs(quantityChange);
+      const batches = await tx.inventoryBatch.findMany({
+        where: { productId: product.id, remainingQuantity: { gt: 0 } },
+        orderBy: [{ expiryDate: "asc" }, { createdAt: "asc" }],
+      });
+      for (const b of batches) {
+        if (left <= 0) break;
+        const take = Math.min(b.remainingQuantity, left);
+        await tx.inventoryBatch.update({
+          where: { id: b.id },
+          data: { remainingQuantity: { decrement: take } },
+        });
+        if (!targetBatchId) {
+          targetBatchId = b.id;
+          batchNum = b.batchNumber;
+        }
+        left -= take;
+      }
+    } else if (quantityChange > 0) {
+      // Điều chỉnh tăng mà không chọn lô -> cộng vào lô mới nhất nếu có
+      const latestBatch = await tx.inventoryBatch.findFirst({
+        where: { productId: product.id },
+        orderBy: { expiryDate: "desc" },
+      });
+      if (latestBatch) {
+        targetBatchId = latestBatch.id;
+        batchNum = latestBatch.batchNumber;
+        await tx.inventoryBatch.update({
+          where: { id: latestBatch.id },
+          data: { remainingQuantity: { increment: quantityChange } },
+        });
+      }
+    }
 
-  await prisma.stockTransaction.create({
-    data: {
-      productId: product.id,
-      batchId: targetBatchId,
-      type,
-      quantityChange,
-      referenceId: slip.id,
-      note: `${type === "DISPOSAL" ? "Xuất hủy" : "Điều chỉnh kiểm kê"} ${slipCode}${
-        targetBatchNumber ? ` (Lô ${targetBatchNumber})` : ""
-      }: ${reason}`,
-      createdById: session.userId,
-      createdByName: session.fullName,
-    },
+    const createdSlip = await tx.disposalSlip.create({
+      data: {
+        slipCode,
+        type,
+        productId: product.id,
+        batchId: targetBatchId,
+        quantityChange,
+        reason,
+        createdById: session.userId,
+        createdByName: session.fullName,
+      },
+    });
+
+    await tx.product.update({
+      where: { id: product.id },
+      data: { stockQuantity: { increment: quantityChange } },
+    });
+
+    await tx.stockTransaction.create({
+      data: {
+        productId: product.id,
+        batchId: targetBatchId,
+        type,
+        quantityChange,
+        referenceId: createdSlip.id,
+        note: `${type === "DISPOSAL" ? "Xuất hủy" : "Điều chỉnh kiểm kê"} ${slipCode}${
+          batchNum ? ` (Lô ${batchNum})` : ""
+        }: ${reason}`,
+        createdById: session.userId,
+        createdByName: session.fullName,
+      },
+    });
+
+    return { slip: createdSlip, targetBatchNumber: batchNum };
   });
 
   return NextResponse.json(

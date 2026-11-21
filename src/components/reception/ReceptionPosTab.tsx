@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Banknote,
   CheckCircle2,
+  Eye,
   FileText,
   History,
   Minus,
@@ -15,6 +16,8 @@ import {
   ShoppingBag,
   Stethoscope,
   Trash2,
+  Users,
+  X,
 } from "lucide-react";
 import { formatDateTimeVn, formatVnd } from "@/lib/format";
 import { buildVietQrUrl, calculateInvoiceTotals } from "@/lib/pricing-utils";
@@ -40,6 +43,13 @@ export interface PosPromotion {
   applicableScope: string;
 }
 
+export interface PosCustomerOption {
+  id: string;
+  fullName: string;
+  phone: string | null;
+  email: string;
+}
+
 export interface PosInvoice {
   id: string;
   invoiceCode: string;
@@ -49,7 +59,12 @@ export interface PosInvoice {
   eventDiscountAmount: number;
   couponDiscountAmount: number;
   totalAmount: number;
+  appliedEventPromoTitle?: string | null;
+  appliedCouponCode?: string | null;
   paymentMethod: string | null;
+  cashReceived?: number | null;
+  cashChange?: number | null;
+  createdAt?: string;
   paidAt: string | null;
   guestName: string | null;
   guestPhone: string | null;
@@ -68,6 +83,7 @@ export interface PosInvoice {
     quantity: number;
     unitPrice: number;
     totalPrice: number;
+    dosageInstruction?: string | null;
     addedByRole: string;
     product?: { id: string; stockQuantity: number; retailUnit: string } | null;
   }[];
@@ -90,11 +106,31 @@ function makeRetailCode(): string {
   return code;
 }
 
+function getCashSuggestions(total: number): number[] {
+  if (total <= 0) return [];
+  const set = new Set<number>([total]);
+  const roundUp50k = Math.ceil(total / 50000) * 50000;
+  const roundUp100k = Math.ceil(total / 100000) * 100000;
+  const roundUp500k = Math.ceil(total / 500000) * 500000;
+  for (const cand of [roundUp50k, roundUp100k, 200000, 500000, roundUp500k, 1000000]) {
+    if (cand >= total) set.add(cand);
+  }
+  return Array.from(set).sort((a, b) => a - b).slice(0, 5);
+}
+
+const SCOPE_LABEL: Record<string, string> = {
+  ALL: "Toàn hóa đơn",
+  MEDICAL: "Dịch vụ Y tế & Thuốc",
+  SPA: "Dịch vụ Spa",
+  SHOP: "Sản phẩm Shop",
+};
+
 export function ReceptionPosTab({
   pendingInvoices,
   paidInvoices,
   promotions,
   products,
+  customers = [],
   bankInfo,
   onReloadPos,
   notify,
@@ -103,12 +139,16 @@ export function ReceptionPosTab({
   paidInvoices: PosInvoice[];
   promotions: PosPromotion[];
   products: PosProduct[];
+  customers?: PosCustomerOption[];
   bankInfo: { bankCode: string; bankAccountNumber: string; bankAccountName: string };
   onReloadPos: () => Promise<void>;
   notify: (msg: string, type?: "ok" | "err") => void;
 }) {
-  // 2 chế độ rõ ràng theo checklist E.1
-  const [posMode, setPosMode] = useState<"DOCTOR_QUEUE" | "RETAIL_SHOP">("DOCTOR_QUEUE");
+  // 2 chế độ POS chính + Tab xem danh sách hóa đơn đã thu
+  const [posMode, setPosMode] = useState<"DOCTOR_QUEUE" | "RETAIL_SHOP" | "PAID_HISTORY">(
+    "DOCTOR_QUEUE"
+  );
+  const [inspectPaidInvoice, setInspectPaidInvoice] = useState<PosInvoice | null>(null);
 
   // --- MODE 1: PHIẾU CHỜ THANH TOÁN TỪ BÁC SĨ ---
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
@@ -121,7 +161,7 @@ export function ReceptionPosTab({
   const [cashReceived, setCashReceived] = useState<string>("");
   const [paying, setPaying] = useState(false);
 
-  // Banner in A4 ngay sau khi thanh toán thành công
+  // Banner thành công kèm thông tin khóa cứng & in A4
   const [lastPaid, setLastPaid] = useState<{
     invoiceId: string;
     invoiceCode: string;
@@ -132,6 +172,8 @@ export function ReceptionPosTab({
 
   // --- MODE 2: BÁN LẺ SHOP NHANH ---
   const [retailSearch, setRetailSearch] = useState("");
+  const [retailCustomerType, setRetailCustomerType] = useState<"GUEST" | "MEMBER">("GUEST");
+  const [retailCustomerId, setRetailCustomerId] = useState<string>("");
   const [retailGuestName, setRetailGuestName] = useState("Khách mua lẻ tại quầy");
   const [retailGuestPhone, setRetailGuestPhone] = useState("");
   const [retailCart, setRetailCart] = useState<{ productId: string; quantity: number }[]>([]);
@@ -158,12 +200,25 @@ export function ReceptionPosTab({
     [pendingInvoices, effectiveSelectedId]
   );
 
-  const couponPromos = useMemo(
-    () => promotions.filter((p) => Boolean(p.code)),
-    [promotions]
-  );
+  const couponPromos = useMemo(() => promotions.filter((p) => Boolean(p.code)), [promotions]);
 
-  // Mode 1 totals
+  // Mode 1: Đánh giá sự kiện phù hợp cho hóa đơn hiện tại
+  const eventPromoPreviews = useMemo(() => {
+    if (!activeInvoice) return [];
+    const items = activeInvoice.items.map((i) => ({
+      category: i.category,
+      totalPrice: i.totalPrice,
+    }));
+    return promotions.map((promo) => {
+      const calc = calculateInvoiceTotals(items, promo, null);
+      return {
+        promo,
+        estimatedDiscount: calc.eventDiscountAmount,
+        eligible: calc.eventDiscountAmount > 0,
+      };
+    });
+  }, [activeInvoice, promotions]);
+
   const selectedEventPromo = useMemo(
     () => promotions.find((p) => p.id === selectedEventPromoId) || null,
     [promotions, selectedEventPromoId]
@@ -206,7 +261,12 @@ export function ReceptionPosTab({
           totalPrice: prod.price * row.quantity,
         };
       })
-      .filter(Boolean) as { productId: string; quantity: number; product: PosProduct; totalPrice: number }[];
+      .filter(Boolean) as {
+      productId: string;
+      quantity: number;
+      product: PosProduct;
+      totalPrice: number;
+    }[];
   }, [retailCart, shopProducts]);
 
   const retailEventPromo = useMemo(
@@ -324,6 +384,10 @@ export function ReceptionPosTab({
       notify("Vui lòng chọn ít nhất 1 sản phẩm Shop để thanh toán", "err");
       return;
     }
+    if (retailCustomerType === "MEMBER" && !retailCustomerId) {
+      notify("Vui lòng chọn khách hàng thành viên hoặc chuyển sang Khách vãng lai", "err");
+      return;
+    }
     setRetailPaying(true);
     try {
       const cashVal =
@@ -336,8 +400,9 @@ export function ReceptionPosTab({
         body: JSON.stringify({
           payNow: true,
           invoiceCode: retailDraftCode,
-          guestName: retailGuestName,
-          guestPhone: retailGuestPhone,
+          customerId: retailCustomerType === "MEMBER" ? retailCustomerId : null,
+          guestName: retailCustomerType === "GUEST" ? retailGuestName : null,
+          guestPhone: retailCustomerType === "GUEST" ? retailGuestPhone : null,
           items: retailCart,
           eventPromoId: retailEventPromoId || null,
           couponCode: retailCouponCode.trim() || null,
@@ -358,6 +423,8 @@ export function ReceptionPosTab({
           negativeWarnings: data.negativeStockWarnings || [],
         });
         setRetailCart([]);
+        setRetailCustomerType("GUEST");
+        setRetailCustomerId("");
         setRetailGuestName("Khách mua lẻ tại quầy");
         setRetailGuestPhone("");
         setRetailEventPromoId("");
@@ -378,9 +445,18 @@ export function ReceptionPosTab({
       .includes(retailSearch.trim().toLowerCase());
   });
 
+  const cashSuggestionsMode1 = useMemo(
+    () => getCashSuggestions(posTotals.totalAmount),
+    [posTotals.totalAmount]
+  );
+  const cashSuggestionsMode2 = useMemo(
+    () => getCashSuggestions(retailTotals.totalAmount),
+    [retailTotals.totalAmount]
+  );
+
   return (
     <div className="space-y-5">
-      {/* Banner thanh toán thành công kèm 2 nút In A4 ngay lập tức */}
+      {/* Banner thanh toán thành công */}
       {lastPaid && (
         <div className="rounded-3xl border-2 border-emerald-400 bg-emerald-50 p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -388,7 +464,8 @@ export function ReceptionPosTab({
               <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
               <div>
                 <p className="text-base font-extrabold text-emerald-900">
-                  Thu ngân thành công — Hóa đơn {lastPaid.invoiceCode} ({formatVnd(lastPaid.totalAmount)})
+                  Thu ngân thành công — Hóa đơn {lastPaid.invoiceCode} (
+                  {formatVnd(lastPaid.totalAmount)})
                 </p>
                 <p className="text-xs text-emerald-800">
                   Đã trừ tồn kho tự động theo nguyên tắc FEFO
@@ -432,32 +509,147 @@ export function ReceptionPosTab({
         </div>
       )}
 
-      {/* 2 CHẾ ĐỘ POS RÕ RÀNG (E.1) */}
-      <div className="inline-flex rounded-2xl border border-[#0F766E]/15 bg-white p-1.5 shadow-xs">
-        <button
-          type="button"
-          onClick={() => setPosMode("DOCTOR_QUEUE")}
-          className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-extrabold transition ${
-            posMode === "DOCTOR_QUEUE"
-              ? "bg-[#0F766E] text-white"
-              : "text-[#476268] hover:text-[#132A2E]"
-          }`}
-        >
-          <Stethoscope className="h-4 w-4" />
-          Tab 1: Phiếu chờ thanh toán từ Bác sĩ ({pendingInvoices.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setPosMode("RETAIL_SHOP")}
-          className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-extrabold transition ${
-            posMode === "RETAIL_SHOP"
-              ? "bg-[#F97316] text-white"
-              : "text-[#476268] hover:text-[#132A2E]"
-          }`}
-        >
-          <ShoppingBag className="h-4 w-4" />
-          Tab 2: Bán lẻ Shop nhanh (Không khám bệnh)
-        </button>
+      {/* Modal Xem chi tiết Hóa đơn đã thanh toán */}
+      {inspectPaidInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#132A2E]/60 p-6 backdrop-blur-xs">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-[#0F766E]/20 bg-white p-7 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-start justify-between border-b border-[#132A2E]/10 pb-3">
+              <div>
+                <h3 className="font-mono text-lg font-extrabold text-[#0F766E]">
+                  Chi tiết Hóa đơn {inspectPaidInvoice.invoiceCode}
+                </h3>
+                <p className="text-[#476268]">
+                  Khách:{" "}
+                  <strong>
+                    {inspectPaidInvoice.customer?.fullName || inspectPaidInvoice.guestName}
+                  </strong>{" "}
+                  • {inspectPaidInvoice.petSummary || "Bán lẻ Shop"}
+                </p>
+                <p className="text-[11px] text-[#476268]">
+                  Thu lúc: {formatDateTimeVn(inspectPaidInvoice.paidAt)} • Thu ngân:{" "}
+                  <strong>{inspectPaidInvoice.cashier?.fullName || "—"}</strong> • PTTT:{" "}
+                  <strong>
+                    {inspectPaidInvoice.paymentMethod === "VIETQR" ? "Chuyển khoản VietQR" : "Tiền mặt"}
+                  </strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectPaidInvoice(null)}
+                className="rounded-lg p-1.5 text-[#476268] hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-[#132A2E]/10 uppercase text-[#476268]">
+                  <th className="py-2">Hạng mục</th>
+                  <th className="py-2 text-center">SL</th>
+                  <th className="py-2 text-right">Đơn giá</th>
+                  <th className="py-2 text-right">Thành tiền</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#132A2E]/8">
+                {inspectPaidInvoice.items.map((it) => (
+                  <tr key={it.id}>
+                    <td className="py-2">
+                      <p className="font-bold text-[#132A2E]">{it.name}</p>
+                      {it.dosageInstruction && (
+                        <p className="text-[11px] text-[#476268]">Liều dùng: {it.dosageInstruction}</p>
+                      )}
+                    </td>
+                    <td className="py-2 text-center font-bold">
+                      {it.quantity} {it.unit}
+                    </td>
+                    <td className="py-2 text-right">{formatVnd(it.unitPrice)}</td>
+                    <td className="py-2 text-right font-bold">{formatVnd(it.totalPrice)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="space-y-1 rounded-2xl bg-[#FAF9F6] p-4">
+              <div className="flex justify-between">
+                <span>Tạm tính</span>
+                <strong>{formatVnd(inspectPaidInvoice.subtotal)}</strong>
+              </div>
+              {inspectPaidInvoice.eventDiscountAmount > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>Giảm sự kiện ({inspectPaidInvoice.appliedEventPromoTitle || "Ưu đãi"})</span>
+                  <strong>-{formatVnd(inspectPaidInvoice.eventDiscountAmount)}</strong>
+                </div>
+              )}
+              {inspectPaidInvoice.couponDiscountAmount > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>Giảm mã ưu đãi ({inspectPaidInvoice.appliedCouponCode})</span>
+                  <strong>-{formatVnd(inspectPaidInvoice.couponDiscountAmount)}</strong>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-extrabold text-[#0F766E]">
+                <span>Tổng đã thu</span>
+                <span>{formatVnd(inspectPaidInvoice.totalAmount)}</span>
+              </div>
+            </div>
+
+            {inspectPaidInvoice.auditLogs.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <p className="font-extrabold text-amber-900">Lịch sử chỉnh sửa tại quầy:</p>
+                <ul className="mt-1 space-y-1 text-amber-950">
+                  {inspectPaidInvoice.auditLogs.map((l) => (
+                    <li key={l.id}>
+                      • <strong>{l.actorName}</strong> ({formatDateTimeVn(l.createdAt)}):{" "}
+                      <strong>{l.action}</strong> [{l.itemName}] — {l.detail}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 2 CHẾ ĐỘ POS CHÍNH + LỊCH SỬ ĐÃ THU */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-2xl border border-[#0F766E]/15 bg-white p-1.5 shadow-xs">
+          <button
+            type="button"
+            onClick={() => setPosMode("DOCTOR_QUEUE")}
+            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-extrabold transition ${
+              posMode === "DOCTOR_QUEUE"
+                ? "bg-[#0F766E] text-white"
+                : "text-[#476268] hover:text-[#132A2E]"
+            }`}
+          >
+            <Stethoscope className="h-4 w-4" />
+            Tab 1: Phiếu chờ thanh toán từ Bác sĩ ({pendingInvoices.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPosMode("RETAIL_SHOP")}
+            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-extrabold transition ${
+              posMode === "RETAIL_SHOP"
+                ? "bg-[#F97316] text-white"
+                : "text-[#476268] hover:text-[#132A2E]"
+            }`}
+          >
+            <ShoppingBag className="h-4 w-4" />
+            Tab 2: Bán lẻ Shop nhanh
+          </button>
+          <button
+            type="button"
+            onClick={() => setPosMode("PAID_HISTORY")}
+            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-extrabold transition ${
+              posMode === "PAID_HISTORY"
+                ? "bg-[#132A2E] text-white"
+                : "text-[#476268] hover:text-[#132A2E]"
+            }`}
+          >
+            <History className="h-4 w-4" />
+            Hóa đơn đã thanh toán ({paidInvoices.length})
+          </button>
+        </div>
       </div>
 
       {/* ========================================================
@@ -484,6 +676,7 @@ export function ReceptionPosTab({
                     onClick={() => {
                       setSelectedInvoiceId(inv.id);
                       setCashReceived("");
+                      setSelectedEventPromoId("");
                     }}
                     className={`w-full rounded-2xl border p-4 text-left transition ${
                       effectiveSelectedId === inv.id
@@ -506,18 +699,23 @@ export function ReceptionPosTab({
                       {inv.petSummary || "Mua lẻ Shop"} •{" "}
                       {inv.doctor ? `BS: ${inv.doctor.fullName}` : "Bán lẻ tại quầy"}
                     </p>
+                    {inv.createdAt && (
+                      <p className="mt-1 text-[10px] font-semibold text-[#476268]">
+                        Giờ gửi: {formatDateTimeVn(inv.createdAt)}
+                      </p>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Lịch sử đã thu gần đây + Nút In A4 */}
+            {/* Lịch sử đã thu gần đây */}
             <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-5 shadow-sm">
               <h3 className="text-sm font-extrabold uppercase tracking-wide text-[#476268]">
-                Đã thu gần đây ({paidInvoices.length}) — In lại A4
+                Đã thu gần đây ({paidInvoices.length})
               </h3>
               <div className="mt-3 max-h-96 space-y-2.5 overflow-y-auto">
-                {paidInvoices.slice(0, 12).map((inv) => (
+                {paidInvoices.slice(0, 10).map((inv) => (
                   <div
                     key={inv.id}
                     className="rounded-xl border border-slate-200 bg-[#FAF9F6] p-3 text-xs space-y-1.5"
@@ -534,25 +732,23 @@ export function ReceptionPosTab({
                       {inv.customer?.fullName || inv.guestName} •{" "}
                       {inv.paymentMethod === "VIETQR" ? "VietQR" : "Tiền mặt"}
                     </p>
-                    <div className="flex gap-1.5 pt-0.5">
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setInspectPaidInvoice(inv)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-[#132A2E] hover:bg-slate-50"
+                      >
+                        <Eye className="h-3 w-3" />
+                        Chi tiết
+                      </button>
                       <Link
                         href={`/in/hoa-don/${inv.id}`}
                         target="_blank"
                         className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2 py-1 text-[11px] font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
                       >
                         <Printer className="h-3 w-3" />
-                        In Hóa đơn A4
+                        In A4
                       </Link>
-                      {inv.medicalRecord && (
-                        <Link
-                          href={`/in/phieu-kham/${inv.medicalRecord.id}`}
-                          target="_blank"
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-[#132A2E] hover:bg-slate-50"
-                        >
-                          <FileText className="h-3 w-3" />
-                          In Phiếu khám
-                        </Link>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -604,10 +800,13 @@ export function ReceptionPosTab({
                         {zeroStockItemsInInvoice
                           .map(
                             (i) =>
-                              `${i.name} (tồn hiện tại: ${i.product?.stockQuantity ?? 0}, xuất: ${i.quantity})`
+                              `${i.name} (tồn hiện tại: ${i.product?.stockQuantity ?? 0}, xuất: ${
+                                i.quantity
+                              })`
                           )
                           .join("; ")}
-                        . Hệ thống <strong>VẪN CHO PHÉP</strong> xác nhận thu tiền (chấp nhận tồn kho âm tạm thời).
+                        . Hệ thống <strong>VẪN CHO PHÉP</strong> xác nhận thu tiền (chấp nhận tồn
+                        kho âm tạm thời).
                       </p>
                     </div>
                   </div>
@@ -649,83 +848,91 @@ export function ReceptionPosTab({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#132A2E]/8">
-                    {activeInvoice.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="py-2.5 pr-2">
-                          <p className="font-bold text-[#132A2E]">{item.name}</p>
-                          <p className="text-[11px] text-[#476268]">
-                            {item.itemType === "SERVICE"
-                              ? "Dịch vụ"
-                              : item.itemType === "MEDICINE"
-                              ? "Thuốc bác sĩ kê"
-                              : "Sản phẩm Shop"}
-                            {item.product && (
-                              <span
-                                className={
-                                  item.product.stockQuantity <= 0
-                                    ? " ml-2 font-extrabold text-rose-600"
-                                    : " ml-2 text-emerald-700"
-                                }
-                              >
-                                (Tồn kho: {item.product.stockQuantity} {item.unit})
-                              </span>
+                    {activeInvoice.items.map((item) => {
+                      const itemLowStock = Boolean(
+                        item.product &&
+                          (item.product.stockQuantity <= 0 ||
+                            item.product.stockQuantity < item.quantity)
+                      );
+                      return (
+                        <tr key={item.id} className={itemLowStock ? "bg-rose-50/70" : ""}>
+                          <td className="py-2.5 pr-2">
+                            <p className="font-bold text-[#132A2E]">{item.name}</p>
+                            <p className="text-[11px] text-[#476268]">
+                              {item.itemType === "SERVICE"
+                                ? "Dịch vụ"
+                                : item.itemType === "MEDICINE"
+                                ? "Thuốc bác sĩ kê"
+                                : "Sản phẩm Shop"}
+                              {item.product && (
+                                <span
+                                  className={
+                                    itemLowStock
+                                      ? " ml-2 font-extrabold text-rose-600"
+                                      : " ml-2 text-emerald-700"
+                                  }
+                                >
+                                  (Tồn kho: {item.product.stockQuantity} {item.unit}
+                                  {itemLowStock ? " — ⚠ Tồn không đủ, vẫn cho thanh toán" : ""})
+                                </span>
+                              )}
+                            </p>
+                          </td>
+                          <td className="py-2.5">{formatVnd(item.unitPrice)}</td>
+                          <td className="py-2.5">
+                            {item.itemType !== "SERVICE" ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateInvoiceItemQty(item.id, item.quantity - 1)
+                                  }
+                                  className="rounded border border-slate-300 bg-white p-1 hover:bg-slate-100"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </button>
+                                <span className="w-6 text-center font-bold">{item.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateInvoiceItemQty(item.id, item.quantity + 1)
+                                  }
+                                  className="rounded border border-slate-300 bg-white p-1 hover:bg-slate-100"
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="font-bold">{item.quantity}</span>
                             )}
-                          </p>
-                        </td>
-                        <td className="py-2.5">{formatVnd(item.unitPrice)}</td>
-                        <td className="py-2.5">
-                          {item.itemType !== "SERVICE" ? (
-                            <div className="inline-flex items-center gap-1.5">
+                          </td>
+                          <td className="py-2.5 text-right font-bold">
+                            {formatVnd(item.totalPrice)}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            {item.itemType !== "SERVICE" && (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleUpdateInvoiceItemQty(item.id, item.quantity - 1)
-                                }
-                                className="rounded border border-slate-300 p-1 hover:bg-slate-100"
+                                onClick={() => handleRemoveInvoiceItem(item.id)}
+                                title="Bỏ bớt thuốc/sản phẩm (ghi Audit Log)"
+                                className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
                               >
-                                <Minus className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
-                              <span className="w-6 text-center font-bold">{item.quantity}</span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleUpdateInvoiceItemQty(item.id, item.quantity + 1)
-                                }
-                                className="rounded border border-slate-300 p-1 hover:bg-slate-100"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="font-bold">{item.quantity}</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-right font-bold">
-                          {formatVnd(item.totalPrice)}
-                        </td>
-                        <td className="py-2.5 text-right">
-                          {item.itemType !== "SERVICE" && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveInvoiceItem(item.id)}
-                              title="Bỏ bớt thuốc/sản phẩm (ghi Audit Log)"
-                              className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 
-                {/* LỊCH SỬ CHỈNH SỬA HÓA ĐƠN (AUDIT LOG) */}
+                {/* LỊCH SỬ CHỈNH SỬA HÓA ĐƠN TẠI QUẦY (AUDIT LOG) */}
                 {activeInvoice.auditLogs.length > 0 && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
                     <p className="flex items-center gap-1.5 text-xs font-extrabold text-amber-900">
                       <History className="h-4 w-4" />
-                      Lịch sử chỉnh sửa hóa đơn tại quầy (InvoiceAuditLog):
+                      Lịch sử chỉnh sửa tại quầy ({activeInvoice.auditLogs.length}):
                     </p>
                     <ul className="mt-2 space-y-1 text-xs text-amber-950">
                       {activeInvoice.auditLogs.map((log) => (
@@ -738,41 +945,95 @@ export function ReceptionPosTab({
                   </div>
                 )}
 
-                {/* ÁP DỤNG ĐA KHUYẾN MÃI (SỰ KIỆN TRƯỚC -> MÃ GIẢM GIÁ SAU) */}
-                <div className="grid grid-cols-2 gap-4 rounded-2xl bg-[#FAF9F6] p-4">
+                {/* BỘ TÍNH ĐA KHUYẾN MÃI & SỰ KIỆN CỘNG DỒN (BƯỚC 1 -> BƯỚC 2) */}
+                <div className="space-y-4 rounded-2xl bg-[#FAF9F6] p-4">
                   <div>
-                    <label className="mb-1 block text-xs font-bold text-[#132A2E]">
-                      1. Ưu đãi Sự kiện / Dịch vụ (trừ bước 1)
+                    <label className="mb-2 block text-xs font-extrabold text-[#132A2E]">
+                      1. Sự kiện khuyến mãi đang chạy (Tick chọn áp dụng bước 1 — tự nhận diện dịch
+                      vụ/sản phẩm phù hợp)
                     </label>
-                    <select
-                      value={selectedEventPromoId}
-                      onChange={(e) => setSelectedEventPromoId(e.target.value)}
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs font-semibold"
-                    >
-                      <option value="">Không áp dụng sự kiện</option>
-                      {promotions.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title} (
-                          {p.discountType === "PERCENT"
-                            ? `-${p.discountValue}%`
-                            : `-${formatVnd(p.discountValue)}`}
-                          )
-                        </option>
-                      ))}
-                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      {eventPromoPreviews.map(({ promo, estimatedDiscount, eligible }) => {
+                        const checked = selectedEventPromoId === promo.id;
+                        return (
+                          <button
+                            key={promo.id}
+                            type="button"
+                            onClick={() =>
+                              setSelectedEventPromoId(checked ? "" : promo.id)
+                            }
+                            className={`flex items-start justify-between gap-2 rounded-xl border p-2.5 text-left text-xs transition ${
+                              checked
+                                ? "border-[#0F766E] bg-[#0F766E]/10 ring-1 ring-[#0F766E]"
+                                : eligible
+                                ? "border-emerald-200 bg-white hover:border-[#0F766E]/50"
+                                : "border-slate-200 bg-slate-50 opacity-70"
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="checkbox"
+                                  readOnly
+                                  checked={checked}
+                                  className="h-3.5 w-3.5 accent-[#0F766E]"
+                                />
+                                <span className="truncate font-bold text-[#132A2E]">
+                                  {promo.title}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 text-[10px] text-[#476268]">
+                                Phạm vi: {SCOPE_LABEL[promo.applicableScope] || promo.applicableScope}
+                              </p>
+                            </div>
+                            <span
+                              className={`shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-extrabold ${
+                                eligible
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              {eligible ? `-${formatVnd(estimatedDiscount)}` : "Chưa khớp"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
+
                   <div>
-                    <label className="mb-1 block text-xs font-bold text-[#132A2E]">
-                      2. Mã giảm giá cộng dồn (trừ bước 2 trên phần còn lại)
+                    <label className="mb-1 block text-xs font-extrabold text-[#132A2E]">
+                      2. Mã giảm giá / Ưu đãi cộng dồn trên tổng còn lại (trừ bước 2)
                     </label>
-                    <input
-                      value={couponCode}
-                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                      placeholder="Nhập mã VD: MEMBER10"
-                      className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 font-mono text-xs font-bold uppercase"
-                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                        placeholder="Nhập mã VD: MEMBER10"
+                        className="flex-1 rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 font-mono text-xs font-bold uppercase"
+                      />
+                      {couponCode.trim() && (
+                        <span
+                          className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                            matchedCouponPromo && matchedCouponPromo.id !== selectedEventPromo?.id
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-rose-100 text-rose-700"
+                          }`}
+                        >
+                          {matchedCouponPromo && matchedCouponPromo.id !== selectedEventPromo?.id
+                            ? `✓ Hợp lệ (${
+                                matchedCouponPromo.discountType === "PERCENT"
+                                  ? `-${matchedCouponPromo.discountValue}%`
+                                  : `-${formatVnd(matchedCouponPromo.discountValue)}`
+                              })`
+                            : matchedCouponPromo?.id === selectedEventPromo?.id
+                            ? "Trùng ưu đãi bước 1"
+                            : "Mã không hợp lệ"}
+                        </span>
+                      )}
+                    </div>
                     {couponPromos.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {couponPromos.map((cp) => (
                           <button
                             key={cp.id}
@@ -780,7 +1041,11 @@ export function ReceptionPosTab({
                             onClick={() => setCouponCode(cp.code || "")}
                             className="rounded-md bg-[#0F766E]/10 px-2 py-0.5 font-mono text-[10px] font-bold text-[#0F766E] hover:bg-[#0F766E]/20"
                           >
-                            {cp.code}
+                            {cp.code} (
+                            {cp.discountType === "PERCENT"
+                              ? `-${cp.discountValue}%`
+                              : `-${formatVnd(cp.discountValue)}`}
+                            )
                           </button>
                         ))}
                       </div>
@@ -794,24 +1059,24 @@ export function ReceptionPosTab({
                     <span className="text-[#476268]">Tạm tính</span>
                     <span className="font-bold">{formatVnd(posTotals.subtotal)}</span>
                   </div>
-                  {posTotals.eventDiscountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Giảm ưu đãi sự kiện (bước 1)</span>
-                      <span className="font-bold">
-                        -{formatVnd(posTotals.eventDiscountAmount)}
-                      </span>
-                    </div>
-                  )}
-                  {posTotals.couponDiscountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Giảm mã ưu đãi cộng dồn (bước 2)</span>
-                      <span className="font-bold">
-                        -{formatVnd(posTotals.couponDiscountAmount)}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-emerald-700">
+                    <span>Giảm theo sự kiện / dịch vụ (bước 1)</span>
+                    <span className="font-bold">
+                      {posTotals.eventDiscountAmount > 0
+                        ? `-${formatVnd(posTotals.eventDiscountAmount)}`
+                        : "0đ"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-emerald-700">
+                    <span>Giảm theo mã ưu đãi cộng dồn (bước 2)</span>
+                    <span className="font-bold">
+                      {posTotals.couponDiscountAmount > 0
+                        ? `-${formatVnd(posTotals.couponDiscountAmount)}`
+                        : "0đ"}
+                    </span>
+                  </div>
                   <div className="flex justify-between border-t border-[#132A2E]/10 pt-2 text-lg font-extrabold text-[#0F766E]">
-                    <span>Tổng khách phải thanh toán (tối thiểu 0đ)</span>
+                    <span>Tổng cần thanh toán (tối thiểu 0đ)</span>
                     <span>{formatVnd(posTotals.totalAmount)}</span>
                   </div>
                 </div>
@@ -846,28 +1111,50 @@ export function ReceptionPosTab({
                   </div>
 
                   {paymentMethod === "CASH" ? (
-                    <div className="grid grid-cols-2 gap-4 rounded-2xl bg-[#FAF9F6] p-4">
-                      <div>
-                        <label className="mb-1 block text-xs font-bold">Tiền khách đưa (VNĐ)</label>
-                        <input
-                          type="number"
-                          value={cashReceived}
-                          onChange={(e) => setCashReceived(e.target.value)}
-                          placeholder={String(posTotals.totalAmount)}
-                          className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3.5 py-2.5 text-sm font-bold"
-                        />
+                    <div className="space-y-3 rounded-2xl bg-[#FAF9F6] p-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="mb-1 block text-xs font-bold">
+                            Tiền khách đưa (VNĐ)
+                          </label>
+                          <input
+                            type="number"
+                            value={cashReceived}
+                            onChange={(e) => setCashReceived(e.target.value)}
+                            placeholder={String(posTotals.totalAmount)}
+                            className="w-full rounded-xl border border-[#132A2E]/15 bg-white px-3.5 py-2.5 text-sm font-bold"
+                          />
+                        </div>
+                        <div className="flex flex-col justify-center rounded-xl border border-[#132A2E]/10 bg-white px-4 py-2">
+                          <span className="text-xs text-[#476268]">Tiền thối lại khách</span>
+                          <span className="text-xl font-extrabold text-[#F97316]">
+                            {formatVnd(
+                              Math.max(
+                                0,
+                                Number(cashReceived || posTotals.totalAmount) -
+                                  posTotals.totalAmount
+                              )
+                            )}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex flex-col justify-center rounded-xl border border-[#132A2E]/10 bg-white px-4 py-2">
-                        <span className="text-xs text-[#476268]">Tiền thối lại khách</span>
-                        <span className="text-xl font-extrabold text-[#F97316]">
-                          {formatVnd(
-                            Math.max(
-                              0,
-                              Number(cashReceived || posTotals.totalAmount) - posTotals.totalAmount
-                            )
-                          )}
-                        </span>
-                      </div>
+                      {cashSuggestionsMode1.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-bold text-[#476268]">
+                            Gợi ý mệnh giá nhanh:
+                          </span>
+                          {cashSuggestionsMode1.map((amt, idx) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => setCashReceived(String(amt))}
+                              className="rounded-lg border border-[#0F766E]/25 bg-white px-2.5 py-1 text-xs font-bold text-[#0F766E] hover:bg-[#0F766E] hover:text-white transition"
+                            >
+                              {idx === 0 ? `Vừa đủ (${formatVnd(amt)})` : formatVnd(amt)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex items-center gap-6 rounded-2xl border border-[#0F766E]/20 bg-[#FAF9F6] p-5">
@@ -904,6 +1191,10 @@ export function ReceptionPosTab({
                           Nội dung CK:{" "}
                           <strong className="font-mono">ANIMORA {activeInvoice.invoiceCode}</strong>
                         </p>
+                        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-900">
+                          Lưu ý Lễ tân: Kiểm tra tiền đã về đúng số tiền &amp; nội dung trên điện
+                          thoại ngân hàng phòng khám trước khi bấm &quot;Xác nhận đã thu&quot;.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -939,7 +1230,8 @@ export function ReceptionPosTab({
                   Chọn Sản phẩm Bán lẻ tại Shop ({filteredRetailProducts.length})
                 </h3>
                 <p className="text-xs text-[#476268]">
-                  Bấm để thêm vào giỏ thanh toán ngay. Mặt hàng tồn &le; 0 vẫn cho phép bán kèm cảnh báo đỏ.
+                  Bấm để thêm vào giỏ thanh toán ngay. Mặt hàng tồn &le; 0 vẫn cho phép bán kèm cảnh
+                  báo đỏ.
                 </p>
               </div>
             </div>
@@ -959,22 +1251,24 @@ export function ReceptionPosTab({
                   <div
                     key={p.id}
                     className={`flex items-center justify-between rounded-2xl border p-3.5 text-xs transition ${
-                      isOut
-                        ? "border-rose-300 bg-rose-50/50"
-                        : "border-[#132A2E]/10 bg-[#FAF9F6]"
+                      isOut ? "border-rose-300 bg-rose-50/50" : "border-[#132A2E]/10 bg-[#FAF9F6]"
                     }`}
                   >
                     <div className="min-w-0 pr-2">
                       <p className="truncate font-extrabold text-[#132A2E]">{p.name}</p>
                       <p className="mt-0.5 text-[11px] text-[#476268]">
-                        <strong className="text-[#0F766E]">{formatVnd(p.price)}</strong> / {p.retailUnit}
+                        <strong className="text-[#0F766E]">{formatVnd(p.price)}</strong> /{" "}
+                        {p.retailUnit}{" "}
+                        <span className="rounded bg-slate-200/70 px-1.5 py-0.2 text-[10px]">
+                          {p.group === "SHARED" ? "Dùng chung" : "Shop"}
+                        </span>
                       </p>
                       <p
                         className={`mt-0.5 text-[11px] font-bold ${
                           isOut ? "text-rose-600" : "text-emerald-700"
                         }`}
                       >
-                        Tồn: {p.stockQuantity} {p.retailUnit} {isOut ? "(Tồn ≤ 0)" : ""}
+                        Tồn: {p.stockQuantity} {p.retailUnit} {isOut ? "(⚠ Tồn ≤ 0)" : ""}
                       </p>
                     </div>
                     <button
@@ -998,7 +1292,7 @@ export function ReceptionPosTab({
             </div>
           </div>
 
-          {/* Cột phải 5 cột: Giỏ bán lẻ + Khuyến mãi + Tiền mặt / VietQR */}
+          {/* Cột phải 5 cột: Giỏ bán lẻ + Khách hàng + Khuyến mãi + Tiền mặt / VietQR */}
           <div className="col-span-5 rounded-3xl border border-[#F97316]/30 bg-white p-6 shadow-md space-y-4">
             <div className="flex items-center justify-between border-b border-[#132A2E]/10 pb-3">
               <div>
@@ -1020,29 +1314,80 @@ export function ReceptionPosTab({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div>
-                <label className="mb-1 block font-bold">Tên khách mua lẻ</label>
-                <input
-                  value={retailGuestName}
-                  onChange={(e) => setRetailGuestName(e.target.value)}
-                  className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2"
-                />
+            {/* Chọn Khách vãng lai HOẶC Khách thành viên */}
+            <div className="space-y-2 text-xs">
+              <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-[#FAF9F6] p-1">
+                <button
+                  type="button"
+                  onClick={() => setRetailCustomerType("GUEST")}
+                  className={`rounded-lg py-1.5 font-bold ${
+                    retailCustomerType === "GUEST"
+                      ? "bg-[#0F766E] text-white"
+                      : "text-[#476268]"
+                  }`}
+                >
+                  Khách vãng lai
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRetailCustomerType("MEMBER");
+                    if (!retailCustomerId && customers[0]) setRetailCustomerId(customers[0].id);
+                  }}
+                  className={`inline-flex items-center justify-center gap-1 rounded-lg py-1.5 font-bold ${
+                    retailCustomerType === "MEMBER"
+                      ? "bg-[#0F766E] text-white"
+                      : "text-[#476268]"
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  Khách thành viên
+                </button>
               </div>
-              <div>
-                <label className="mb-1 block font-bold">SĐT (tùy chọn)</label>
-                <input
-                  value={retailGuestPhone}
-                  onChange={(e) => setRetailGuestPhone(e.target.value)}
-                  placeholder="09xx..."
-                  className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2"
-                />
-              </div>
+
+              {retailCustomerType === "GUEST" ? (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="mb-1 block font-bold">Tên khách mua lẻ</label>
+                    <input
+                      value={retailGuestName}
+                      onChange={(e) => setRetailGuestName(e.target.value)}
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-bold">SĐT (tùy chọn)</label>
+                    <input
+                      value={retailGuestPhone}
+                      onChange={(e) => setRetailGuestPhone(e.target.value)}
+                      placeholder="09xx..."
+                      className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="mb-1 block font-bold">Chọn khách hàng thành viên</label>
+                  <select
+                    value={retailCustomerId}
+                    onChange={(e) => setRetailCustomerId(e.target.value)}
+                    className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 font-semibold"
+                  >
+                    <option value="">-- Chọn thành viên --</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.fullName} {c.phone ? `(${c.phone})` : `(${c.email})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {retailZeroStockItems.length > 0 && (
               <div className="rounded-xl border-2 border-rose-500 bg-rose-50 p-3 text-xs font-bold text-rose-800">
-                CẢNH BÁO ĐỎ: {retailZeroStockItems.map((r) => r.product.name).join(", ")} đang có tồn kho &le; 0. Vẫn cho phép thanh toán (tồn âm tạm thời).
+                CẢNH BÁO ĐỎ: {retailZeroStockItems.map((r) => r.product.name).join(", ")} đang có
+                tồn kho &le; 0. Vẫn cho phép thanh toán (tồn âm tạm thời).
               </div>
             )}
 
@@ -1135,13 +1480,13 @@ export function ReceptionPosTab({
               </div>
               {retailTotals.eventDiscountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700">
-                  <span>Giảm sự kiện:</span>
+                  <span>Giảm sự kiện (bước 1):</span>
                   <strong>-{formatVnd(retailTotals.eventDiscountAmount)}</strong>
                 </div>
               )}
               {retailTotals.couponDiscountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700">
-                  <span>Giảm mã ưu đãi:</span>
+                  <span>Giảm mã ưu đãi (bước 2):</span>
                   <strong>-{formatVnd(retailTotals.couponDiscountAmount)}</strong>
                 </div>
               )}
@@ -1180,26 +1525,42 @@ export function ReceptionPosTab({
             </div>
 
             {retailPaymentMethod === "CASH" ? (
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <input
-                  type="number"
-                  value={retailCashReceived}
-                  onChange={(e) => setRetailCashReceived(e.target.value)}
-                  placeholder={`Khách đưa (${retailTotals.totalAmount})`}
-                  className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 font-bold"
-                />
-                <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 font-bold">
-                  <span>Thối lại:</span>
-                  <span className="text-[#F97316]">
-                    {formatVnd(
-                      Math.max(
-                        0,
-                        Number(retailCashReceived || retailTotals.totalAmount) -
-                          retailTotals.totalAmount
-                      )
-                    )}
-                  </span>
+              <div className="space-y-2 text-xs">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <input
+                    type="number"
+                    value={retailCashReceived}
+                    onChange={(e) => setRetailCashReceived(e.target.value)}
+                    placeholder={`Khách đưa (${retailTotals.totalAmount})`}
+                    className="rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 font-bold"
+                  />
+                  <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 font-bold">
+                    <span>Thối lại:</span>
+                    <span className="text-[#F97316]">
+                      {formatVnd(
+                        Math.max(
+                          0,
+                          Number(retailCashReceived || retailTotals.totalAmount) -
+                            retailTotals.totalAmount
+                        )
+                      )}
+                    </span>
+                  </div>
                 </div>
+                {cashSuggestionsMode2.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {cashSuggestionsMode2.map((amt, idx) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setRetailCashReceived(String(amt))}
+                        className="rounded-md border border-[#0F766E]/25 bg-white px-2 py-0.5 text-[11px] font-bold text-[#0F766E] hover:bg-[#0F766E] hover:text-white"
+                      >
+                        {idx === 0 ? "Vừa đủ" : formatVnd(amt)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               retailCartDetailed.length > 0 && (
@@ -1219,12 +1580,19 @@ export function ReceptionPosTab({
                   <div className="space-y-1">
                     <p className="font-extrabold text-[#0F766E]">VietQR Bán lẻ Shop</p>
                     <p>
-                      {bankInfo.bankCode} • <strong className="font-mono">{bankInfo.bankAccountNumber}</strong>
+                      {bankInfo.bankCode} •{" "}
+                      <strong className="font-mono">{bankInfo.bankAccountNumber}</strong>
                     </p>
                     <p>
-                      Số tiền: <strong className="text-[#F97316]">{formatVnd(retailTotals.totalAmount)}</strong>
+                      Số tiền:{" "}
+                      <strong className="text-[#F97316]">
+                        {formatVnd(retailTotals.totalAmount)}
+                      </strong>
                     </p>
                     <p className="font-mono">ND: ANIMORA {retailDraftCode}</p>
+                    <p className="text-[10px] font-semibold text-amber-800">
+                      Kiểm tra tiền về điện thoại trước khi xác nhận.
+                    </p>
                   </div>
                 </div>
               )
@@ -1239,6 +1607,98 @@ export function ReceptionPosTab({
               <CheckCircle2 className="h-4 w-4" />
               {retailPaying ? "Đang thanh toán..." : "Xác nhận đã thu & Trừ kho FEFO"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          TAB 3: DANH SÁCH HÓA ĐƠN ĐÃ THANH TOÁN
+         ======================================================== */}
+      {posMode === "PAID_HISTORY" && (
+        <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-extrabold text-[#132A2E]">
+                Danh sách Hóa đơn đã thanh toán ({paidInvoices.length})
+              </h3>
+              <p className="text-xs text-[#476268]">
+                Xem lại chi tiết từng món, khuyến mãi đã áp dụng, lịch sử chỉnh sửa và phương thức
+                thanh toán.
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#132A2E]/10 uppercase text-[#476268]">
+                  <th className="py-2.5">Mã HĐ / Thời gian</th>
+                  <th className="py-2.5">Khách hàng &amp; Loại</th>
+                  <th className="py-2.5">Số món / Thu ngân</th>
+                  <th className="py-2.5">Phương thức</th>
+                  <th className="py-2.5 text-right">Tổng thanh toán</th>
+                  <th className="py-2.5 text-right">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#132A2E]/8">
+                {paidInvoices.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-[#FAF9F6]">
+                    <td className="py-3">
+                      <p className="font-mono font-extrabold text-[#0F766E]">{inv.invoiceCode}</p>
+                      <p className="text-[11px] text-[#476268]">{formatDateTimeVn(inv.paidAt)}</p>
+                    </td>
+                    <td className="py-3">
+                      <p className="font-bold text-[#132A2E]">
+                        {inv.customer?.fullName || inv.guestName}
+                      </p>
+                      <p className="text-[11px] text-[#476268]">
+                        {inv.type === "RETAIL" ? "Bán lẻ Shop" : inv.petSummary || "Ca khám"}
+                      </p>
+                    </td>
+                    <td className="py-3">
+                      <p className="font-semibold">{inv.items.length} hạng mục</p>
+                      <p className="text-[11px] text-[#476268]">
+                        Thu ngân: {inv.cashier?.fullName || "—"}
+                      </p>
+                    </td>
+                    <td className="py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                          inv.paymentMethod === "VIETQR"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-emerald-100 text-emerald-800"
+                        }`}
+                      >
+                        {inv.paymentMethod === "VIETQR" ? "VietQR" : "Tiền mặt"}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right font-extrabold text-[#0F766E]">
+                      {formatVnd(inv.totalAmount)}
+                    </td>
+                    <td className="py-3 text-right">
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setInspectPaidInvoice(inv)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-bold hover:bg-slate-50"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Chi tiết
+                        </button>
+                        <Link
+                          href={`/in/hoa-don/${inv.id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2.5 py-1 font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                          In A4
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

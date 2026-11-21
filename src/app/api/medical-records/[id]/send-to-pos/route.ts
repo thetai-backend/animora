@@ -33,7 +33,7 @@ export async function POST(
   if (!record) {
     return NextResponse.json({ error: "Không tìm thấy bệnh án" }, { status: 404 });
   }
-  if (record.status === "LOCKED") {
+  if (record.isLocked || record.status === "LOCKED" || record.invoice?.status === "PAID") {
     return NextResponse.json({ error: "Bệnh án đã thanh toán và khóa cứng" }, { status: 423 });
   }
 

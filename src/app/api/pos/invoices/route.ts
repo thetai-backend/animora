@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   const now = new Date();
-  const [pendingInvoices, paidInvoices, promotions, products, settings] = await Promise.all([
+  const [pendingInvoices, paidInvoices, promotions, products, customers, settings] = await Promise.all([
     prisma.invoice.findMany({
       where: { status: "PENDING" },
       include: {
@@ -61,6 +61,11 @@ export async function GET() {
       },
       orderBy: [{ group: "asc" }, { name: "asc" }],
     }),
+    prisma.user.findMany({
+      where: { role: "CUSTOMER", isActive: true },
+      select: { id: true, fullName: true, phone: true, email: true },
+      orderBy: { fullName: "asc" },
+    }),
     prisma.clinicSettings.findUnique({
       where: { id: "default" },
       select: {
@@ -79,6 +84,7 @@ export async function GET() {
     paidInvoices,
     promotions,
     products,
+    customers,
     bankInfo: {
       bankCode: settings?.bankCode || "MB",
       bankAccountNumber: settings?.bankAccountNumber || "08889992468",

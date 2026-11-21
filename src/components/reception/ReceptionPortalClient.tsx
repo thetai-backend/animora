@@ -208,6 +208,9 @@ export function ReceptionPortalClient() {
   const [paidInvoices, setPaidInvoices] = useState<PosInvoice[]>([]);
   const [promotions, setPromotions] = useState<PosPromotion[]>([]);
   const [products, setProducts] = useState<PosProduct[]>([]);
+  const [posCustomers, setPosCustomers] = useState<
+    { id: string; fullName: string; phone: string | null; email: string }[]
+  >([]);
   const [bankInfo, setBankInfo] = useState({
     bankCode: "MB",
     bankAccountNumber: "08889992468",
@@ -247,6 +250,7 @@ export function ReceptionPortalClient() {
     setPaidInvoices(data.paidInvoices || []);
     setPromotions(data.promotions || []);
     setProducts(data.products || []);
+    if (data.customers) setPosCustomers(data.customers);
     if (data.bankInfo) setBankInfo(data.bankInfo);
   };
 
@@ -1741,6 +1745,7 @@ export function ReceptionPortalClient() {
           paidInvoices={paidInvoices}
           promotions={promotions}
           products={products}
+          customers={posCustomers}
           bankInfo={bankInfo}
           onReloadPos={loadPos}
           notify={notify}

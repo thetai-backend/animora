@@ -15,9 +15,13 @@ import {
   Trash2,
   PackageMinus,
   UserPlus,
+  FolderHeart,
+  Eye,
+  X,
 } from "lucide-react";
 import {
   calculatePetAge,
+  formatDateTimeVn,
   formatDateVn,
   formatGender,
   formatShift,
@@ -59,13 +63,16 @@ interface MedicalRecordSummary {
   id: string;
   recordCode: string;
   status: string;
+  isLocked?: boolean;
   createdAt: string;
   guestOwnerName: string | null;
   guestPetName: string | null;
   guestPetSpecies: string | null;
   assessment: string;
+  doctor?: { id: string; fullName: string } | null;
   customer: { fullName: string; phone: string | null } | null;
   pet: { id: string; name: string; species: string; breed: string | null } | null;
+  addendums?: { id: string; authorName: string; content: string; createdAt: string }[];
   invoice: { invoiceCode: string; status: string; totalAmount: number } | null;
 }
 
@@ -73,6 +80,7 @@ interface FullMedicalRecord {
   id: string;
   recordCode: string;
   status: string;
+  isLocked?: boolean;
   lockedAt: string | null;
   createdAt: string;
   guestOwnerName: string | null;
@@ -128,11 +136,19 @@ interface PreviousRecord {
   id: string;
   recordCode: string;
   createdAt: string;
+  status?: string;
+  subjective?: string;
+  objective?: string;
   assessment: string;
   plan: string;
   weightKg: string | null;
   temperatureC: string | null;
+  heartRate?: string | null;
+  respiratoryRate?: string | null;
+  followUpDate?: string | null;
+  followUpNote?: string | null;
   doctor: { fullName: string };
+  addendums?: { id: string; authorName: string; content: string; createdAt: string }[];
 }
 
 interface ServiceItem {
@@ -192,11 +208,18 @@ function getTodayStr(): string {
 }
 
 export function DoctorPortalClient() {
-  const [tab, setTab] = useState<"QUEUE" | "SOAP" | "LEAVE">("QUEUE");
+  const [tab, setTab] = useState<"QUEUE" | "SOAP" | "RECORDS" | "LEAVE">("QUEUE");
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [doctor, setDoctor] = useState<DoctorSelf | null>(null);
   const [queueBookings, setQueueBookings] = useState<QueueBooking[]>([]);
   const [records, setRecords] = useState<MedicalRecordSummary[]>([]);
+  const [allRecords, setAllRecords] = useState<MedicalRecordSummary[]>([]);
+  const [recordSearch, setRecordSearch] = useState("");
+  const [recordFilter, setRecordFilter] = useState<
+    "ALL" | "LOCKED" | "SENT_TO_POS" | "IN_PROGRESS" | "GUEST"
+  >("ALL");
+  const [quickViewPrevRecord, setQuickViewPrevRecord] = useState<PreviousRecord | null>(null);
+  const [medSearch, setMedSearch] = useState("");
   const [leaves, setLeaves] = useState<LeaveItem[]>([]);
   const [internalSlips, setInternalSlips] = useState<InternalSlipItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
@@ -262,6 +285,7 @@ export function DoctorPortalClient() {
     setDoctor(data.doctor);
     setQueueBookings(data.queueBookings || []);
     setRecords(data.medicalRecords || []);
+    setAllRecords(data.allRecords || data.medicalRecords || []);
     setLeaves(data.leaves || []);
     setInternalSlips(data.internalSlips || []);
     setServices(data.services || []);
@@ -412,7 +436,7 @@ export function DoctorPortalClient() {
   };
 
   const handleAddMedicineToPos = () => {
-    const prod = products.find((p) => p.id === addMedicineId);
+    const prod = products.find((p) => p.id === effectiveAddMedicineId);
     if (!prod) return;
     setPosItems((prev) => [
       ...prev,
@@ -425,7 +449,7 @@ export function DoctorPortalClient() {
         unitPrice: prod.price,
         quantity: 1,
         stockQuantity: prod.stockQuantity,
-        dosageInstruction: "Uống sau ăn theo hướng dẫn bác sĩ",
+        dosageInstruction: "Sáng 1 lần – Chiều 1 lần sau ăn trong 5 ngày",
       },
     ]);
   };
@@ -530,15 +554,46 @@ export function DoctorPortalClient() {
     }
   };
 
-  const medicinesAndShared = products.filter(
-    (p) => p.group === "MEDICINE" || p.group === "SHARED" || p.group === "SHOP"
-  );
-  const supplies = products.filter((p) => p.group === "SUPPLY");
+  const medicinesAndShared = products
+    .filter((p) => p.group === "MEDICINE" || p.group === "SHARED" || p.group === "SHOP")
+    .sort((a, b) => {
+      const order: Record<string, number> = { MEDICINE: 0, SHARED: 1, SHOP: 2 };
+      return (order[a.group] ?? 9) - (order[b.group] ?? 9);
+    });
+  const filteredMedicinesAndShared = medicinesAndShared.filter((p) => {
+    if (!medSearch.trim()) return true;
+    return `${p.name} ${p.sku}`.toLowerCase().includes(medSearch.trim().toLowerCase());
+  });
+  const internalUseCandidates = products
+    .filter((p) => p.group === "SUPPLY" || p.group === "MEDICINE" || p.group === "SHARED")
+    .sort((a, b) => {
+      const order: Record<string, number> = { SUPPLY: 0, MEDICINE: 1, SHARED: 2 };
+      return (order[a.group] ?? 9) - (order[b.group] ?? 9);
+    });
   const isLocked = Boolean(
     activeRecord &&
-      (activeRecord.status === "LOCKED" || activeRecord.invoice?.status === "PAID")
+      (activeRecord.isLocked ||
+        activeRecord.status === "LOCKED" ||
+        activeRecord.invoice?.status === "PAID")
   );
-  const selectedMedicineObj = medicinesAndShared.find((p) => p.id === addMedicineId);
+  const effectiveAddMedicineId =
+    filteredMedicinesAndShared.find((p) => p.id === addMedicineId)?.id ||
+    filteredMedicinesAndShared[0]?.id ||
+    "";
+  const selectedMedicineObj = medicinesAndShared.find((p) => p.id === effectiveAddMedicineId);
+  const filteredAllRecords = allRecords.filter((r) => {
+    if (recordFilter === "LOCKED" && !(r.isLocked || r.status === "LOCKED")) return false;
+    if (recordFilter === "SENT_TO_POS" && r.status !== "SENT_TO_POS") return false;
+    if (recordFilter === "IN_PROGRESS" && r.status !== "IN_PROGRESS") return false;
+    if (recordFilter === "GUEST" && r.customer) return false;
+    if (recordSearch.trim()) {
+      const hay = `${r.recordCode} ${r.pet?.name || r.guestPetName || ""} ${
+        r.customer?.fullName || r.guestOwnerName || ""
+      } ${r.doctor?.fullName || ""} ${r.assessment}`.toLowerCase();
+      if (!hay.includes(recordSearch.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
   const lowOrZeroStockDrafts = posItems.filter((it) => {
     if (it.itemType !== "MEDICINE" || !it.productId) return false;
     const prod = products.find((p) => p.id === it.productId);
@@ -626,13 +681,22 @@ export function DoctorPortalClient() {
             Khám bệnh S.O.A.P {activeRecord ? `(${activeRecord.recordCode})` : ""}
           </button>
           <button
+            onClick={() => setTab("RECORDS")}
+            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
+              tab === "RECORDS" ? "bg-[#0D9488] text-white" : "text-[#476268]"
+            }`}
+          >
+            <FolderHeart className="h-4 w-4" />
+            Hồ sơ ca khám ({allRecords.length})
+          </button>
+          <button
             onClick={() => setTab("LEAVE")}
             className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
               tab === "LEAVE" ? "bg-[#132A2E] text-white" : "text-[#476268]"
             }`}
           >
             <CalendarOff className="h-4 w-4" />
-            Đăng ký nghỉ / Nghỉ đột xuất & Xuất vật tư
+            Nghỉ phép &amp; Xuất vật tư
           </button>
         </div>
 
@@ -1000,25 +1064,122 @@ export function DoctorPortalClient() {
                 <h4 className="text-sm font-extrabold text-[#132A2E]">
                   Lịch sử khám các lần trước ({previousRecords.length})
                 </h4>
+                <p className="mt-0.5 text-[11px] text-[#476268]">
+                  Bấm vào từng lần khám để mở xem nhanh đầy đủ S.O.A.P &amp; ghi chú bổ sung.
+                </p>
                 <div className="mt-3 space-y-3">
                   {previousRecords.length === 0 && (
                     <p className="text-xs text-[#476268]">Chưa có lần khám nào trước đây.</p>
                   )}
                   {previousRecords.map((pr) => (
-                    <div
+                    <button
+                      type="button"
                       key={pr.id}
-                      className="rounded-2xl border border-[#132A2E]/10 bg-[#FAF9F6] p-3.5 text-xs"
+                      onClick={() => setQuickViewPrevRecord(pr)}
+                      className="w-full rounded-2xl border border-[#132A2E]/10 bg-[#FAF9F6] p-3.5 text-left text-xs transition hover:border-[#0F766E] hover:bg-emerald-50/40"
                     >
-                      <div className="flex justify-between font-bold text-[#0F766E]">
+                      <div className="flex items-center justify-between font-bold text-[#0F766E]">
                         <span>{pr.recordCode}</span>
-                        <span>{formatDateVn(pr.createdAt)}</span>
+                        <span className="inline-flex items-center gap-1 text-[11px]">
+                          {formatDateVn(pr.createdAt)}
+                          <Eye className="h-3 w-3" />
+                        </span>
                       </div>
-                      <p className="mt-1 font-bold text-[#132A2E]">A: {pr.assessment}</p>
-                      <p className="mt-1 whitespace-pre-line text-[#476268]">P: {pr.plan}</p>
-                    </div>
+                      <p className="mt-1 font-bold text-[#132A2E]">A: {pr.assessment || "—"}</p>
+                      <p className="mt-1 line-clamp-2 whitespace-pre-line text-[#476268]">
+                        P: {pr.plan || "—"}
+                      </p>
+                      <p className="mt-1 text-[10px] font-semibold text-[#476268]">
+                        BS: {pr.doctor.fullName}
+                        {pr.addendums && pr.addendums.length > 0
+                          ? ` • ${pr.addendums.length} ghi chú bổ sung`
+                          : ""}
+                      </p>
+                    </button>
                   ))}
                 </div>
               </div>
+
+              {/* Modal xem nhanh Bệnh án lần khám trước */}
+              {quickViewPrevRecord && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#132A2E]/60 p-6 backdrop-blur-xs">
+                  <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-[#0F766E]/20 bg-white p-7 shadow-2xl space-y-4 text-xs">
+                    <div className="flex items-start justify-between border-b border-[#132A2E]/10 pb-3">
+                      <div>
+                        <h3 className="font-mono text-lg font-extrabold text-[#0F766E]">
+                          Bệnh án lần trước — {quickViewPrevRecord.recordCode}
+                        </h3>
+                        <p className="text-[#476268]">
+                          Ngày khám: <strong>{formatDateTimeVn(quickViewPrevRecord.createdAt)}</strong>{" "}
+                          • Bác sĩ: <strong>{quickViewPrevRecord.doctor.fullName}</strong>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setQuickViewPrevRecord(null)}
+                        className="rounded-lg p-1.5 text-[#476268] hover:bg-slate-100"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div className="rounded-xl bg-[#FAF9F6] p-2.5">
+                        <p className="text-[10px] text-[#476268]">Cân nặng</p>
+                        <p className="font-bold">{quickViewPrevRecord.weightKg || "—"} kg</p>
+                      </div>
+                      <div className="rounded-xl bg-[#FAF9F6] p-2.5">
+                        <p className="text-[10px] text-[#476268]">Thân nhiệt</p>
+                        <p className="font-bold">{quickViewPrevRecord.temperatureC || "—"} °C</p>
+                      </div>
+                      <div className="rounded-xl bg-[#FAF9F6] p-2.5">
+                        <p className="text-[10px] text-[#476268]">Nhịp tim</p>
+                        <p className="font-bold">{quickViewPrevRecord.heartRate || "—"} l/p</p>
+                      </div>
+                      <div className="rounded-xl bg-[#FAF9F6] p-2.5">
+                        <p className="text-[10px] text-[#476268]">Nhịp thở</p>
+                        <p className="font-bold">{quickViewPrevRecord.respiratoryRate || "—"} l/p</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2.5">
+                      <div className="rounded-xl bg-[#FAF9F6] p-3">
+                        <p className="font-extrabold text-[#0F766E]">S — Triệu chứng:</p>
+                        <p className="mt-1 whitespace-pre-line">
+                          {quickViewPrevRecord.subjective || "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-[#FAF9F6] p-3">
+                        <p className="font-extrabold text-[#0F766E]">O — Khám lâm sàng:</p>
+                        <p className="mt-1 whitespace-pre-line">
+                          {quickViewPrevRecord.objective || "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 p-3">
+                        <p className="font-extrabold text-[#0F766E]">A — Chẩn đoán:</p>
+                        <p className="mt-1 whitespace-pre-line font-bold">
+                          {quickViewPrevRecord.assessment || "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-[#FAF9F6] p-3">
+                        <p className="font-extrabold text-[#0F766E]">P — Phác đồ &amp; Lời dặn:</p>
+                        <p className="mt-1 whitespace-pre-line">
+                          {quickViewPrevRecord.plan || "—"}
+                        </p>
+                      </div>
+                    </div>
+                    {quickViewPrevRecord.addendums && quickViewPrevRecord.addendums.length > 0 && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                        <p className="font-extrabold text-amber-900">Ghi chú bổ sung:</p>
+                        {quickViewPrevRecord.addendums.map((ad) => (
+                          <p key={ad.id} className="mt-1">
+                            • <strong>{ad.authorName}</strong> ({formatDateTimeVn(ad.createdAt)}):{" "}
+                            {ad.content}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* CỘT PHẢI (8 CỘT): Biểu mẫu S.O.A.P thuần văn bản + Kê đơn từ kho */}
@@ -1076,60 +1237,80 @@ export function DoctorPortalClient() {
                       O (Objective) — Chỉ số lâm sàng & Khám thực thể
                     </label>
                     <div className="mb-2 grid grid-cols-4 gap-3">
-                      <input
-                        readOnly={isLocked}
-                        placeholder="Cân nặng (kg)"
-                        value={soapForm.weightKg}
-                        onChange={(e) =>
-                          !isLocked && setSoapForm({ ...soapForm, weightKg: e.target.value })
-                        }
-                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                          isLocked
-                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
-                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
-                        }`}
-                      />
-                      <input
-                        readOnly={isLocked}
-                        placeholder="Nhiệt độ (°C)"
-                        value={soapForm.temperatureC}
-                        onChange={(e) =>
-                          !isLocked &&
-                          setSoapForm({ ...soapForm, temperatureC: e.target.value })
-                        }
-                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                          isLocked
-                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
-                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
-                        }`}
-                      />
-                      <input
-                        readOnly={isLocked}
-                        placeholder="Nhịp tim (lần/ph)"
-                        value={soapForm.heartRate}
-                        onChange={(e) =>
-                          !isLocked && setSoapForm({ ...soapForm, heartRate: e.target.value })
-                        }
-                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                          isLocked
-                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
-                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
-                        }`}
-                      />
-                      <input
-                        readOnly={isLocked}
-                        placeholder="Nhịp thở (lần/ph)"
-                        value={soapForm.respiratoryRate}
-                        onChange={(e) =>
-                          !isLocked &&
-                          setSoapForm({ ...soapForm, respiratoryRate: e.target.value })
-                        }
-                        className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                          isLocked
-                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
-                            : "border-[#132A2E]/15 bg-[#FAF9F6]"
-                        }`}
-                      />
+                      <div>
+                        <label className="mb-1 block text-[11px] font-bold text-[#476268]">
+                          Cân nặng (kg)
+                        </label>
+                        <input
+                          readOnly={isLocked}
+                          placeholder="VD: 11.4"
+                          value={soapForm.weightKg}
+                          onChange={(e) =>
+                            !isLocked && setSoapForm({ ...soapForm, weightKg: e.target.value })
+                          }
+                          className={`w-full rounded-xl border px-3 py-2 text-xs font-bold ${
+                            isLocked
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                              : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-bold text-[#476268]">
+                          Thân nhiệt (°C)
+                        </label>
+                        <input
+                          readOnly={isLocked}
+                          placeholder="VD: 38.5"
+                          value={soapForm.temperatureC}
+                          onChange={(e) =>
+                            !isLocked &&
+                            setSoapForm({ ...soapForm, temperatureC: e.target.value })
+                          }
+                          className={`w-full rounded-xl border px-3 py-2 text-xs font-bold ${
+                            isLocked
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                              : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-bold text-[#476268]">
+                          Nhịp tim (lần/phút)
+                        </label>
+                        <input
+                          readOnly={isLocked}
+                          placeholder="VD: 110"
+                          value={soapForm.heartRate}
+                          onChange={(e) =>
+                            !isLocked && setSoapForm({ ...soapForm, heartRate: e.target.value })
+                          }
+                          className={`w-full rounded-xl border px-3 py-2 text-xs font-bold ${
+                            isLocked
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                              : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-bold text-[#476268]">
+                          Nhịp thở (lần/phút)
+                        </label>
+                        <input
+                          readOnly={isLocked}
+                          placeholder="VD: 28"
+                          value={soapForm.respiratoryRate}
+                          onChange={(e) =>
+                            !isLocked &&
+                            setSoapForm({ ...soapForm, respiratoryRate: e.target.value })
+                          }
+                          className={`w-full rounded-xl border px-3 py-2 text-xs font-bold ${
+                            isLocked
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600"
+                              : "border-[#132A2E]/15 bg-[#FAF9F6]"
+                          }`}
+                        />
+                      </div>
                     </div>
                     <textarea
                       rows={2}
@@ -1313,7 +1494,7 @@ export function DoctorPortalClient() {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2.5">
                       <div className="flex gap-2">
                         <select
                           value={addServiceId}
@@ -1322,34 +1503,46 @@ export function DoctorPortalClient() {
                         >
                           {services.map((s) => (
                             <option key={s.id} value={s.id}>
-                              [DV] {s.name} ({formatVnd(s.price)})
+                              [DV {s.category === "SPA" ? "SPA" : "Y TẾ"}] {s.name} (
+                              {formatVnd(s.price)})
                             </option>
                           ))}
                         </select>
                         <button
                           type="button"
                           onClick={handleAddServiceToPos}
-                          title="Thêm dịch vụ"
-                          className="rounded-xl bg-[#0F766E] px-3 py-2 text-xs font-bold text-white"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-[#0F766E] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#0B5D56]"
                         >
                           <Plus className="h-4 w-4" />
+                          Thêm dịch vụ
                         </button>
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          value={medSearch}
+                          onChange={(e) => setMedSearch(e.target.value)}
+                          placeholder="Tìm thuốc / hàng dùng chung..."
+                          className="w-48 rounded-xl border border-[#132A2E]/15 bg-white px-3 py-2 text-xs"
+                        />
                         <select
-                          value={addMedicineId}
+                          value={effectiveAddMedicineId}
                           onChange={(e) => setAddMedicineId(e.target.value)}
-                          className={`flex-1 rounded-xl border bg-white px-2.5 py-2 text-xs font-semibold ${
+                          className={`flex-1 min-w-60 rounded-xl border bg-white px-2.5 py-2 text-xs font-semibold ${
                             selectedMedicineObj && selectedMedicineObj.stockQuantity <= 0
                               ? "border-rose-500 text-rose-700"
                               : "border-[#132A2E]/15"
                           }`}
                         >
-                          {medicinesAndShared.map((p) => (
+                          {filteredMedicinesAndShared.map((p) => (
                             <option key={p.id} value={p.id}>
-                              [{p.group === "MEDICINE" ? "THUỐC" : "SHOP"}] {p.name} — Tồn:{" "}
-                              {p.stockQuantity} {p.retailUnit}
+                              [
+                              {p.group === "MEDICINE"
+                                ? "THUỐC"
+                                : p.group === "SHARED"
+                                ? "DÙNG CHUNG"
+                                : "SHOP"}
+                              ] {p.name} — Còn {p.stockQuantity} {p.retailUnit}
                               {p.stockQuantity <= 0 ? " (⚠ HẾT TỒN)" : ""} ({formatVnd(p.price)})
                             </option>
                           ))}
@@ -1357,10 +1550,10 @@ export function DoctorPortalClient() {
                         <button
                           type="button"
                           onClick={handleAddMedicineToPos}
-                          title="Thêm thuốc"
-                          className="rounded-xl bg-[#F97316] px-3 py-2 text-xs font-bold text-white"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-[#F97316] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#EA580C]"
                         >
                           <Plus className="h-4 w-4" />
+                          Thêm thuốc / sản phẩm kê đơn
                         </button>
                       </div>
                     </div>
@@ -1477,7 +1670,145 @@ export function DoctorPortalClient() {
         )
       )}
 
-      {/* TAB 3: ĐĂNG KÝ NGHỈ / BÁO SỰ CỐ NGHỈ ĐỘT XUẤT & PHIẾU XUẤT KHO NỘI BỘ */}
+      {/* TAB 3: DANH SÁCH HỒ SƠ CA KHÁM (THÀNH VIÊN & KHÁCH VÃNG LAI) */}
+      {tab === "RECORDS" && (
+        <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-extrabold text-[#132A2E]">
+                Danh sách Hồ sơ ca khám S.O.A.P ({filteredAllRecords.length})
+              </h2>
+              <p className="text-xs text-[#476268]">
+                Tra cứu toàn bộ ca khám đã thực hiện (bao gồm cả khách thành viên và khách vãng
+                lai). Bấm vào bất kỳ bệnh án nào để xem chi tiết S.O.A.P &amp; thêm ghi chú bổ sung.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { key: "ALL", label: "Tất cả" },
+                  { key: "LOCKED", label: "Đã khóa cứng" },
+                  { key: "SENT_TO_POS", label: "Chờ thanh toán" },
+                  { key: "IN_PROGRESS", label: "Đang khám" },
+                  { key: "GUEST", label: "Khách vãng lai" },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setRecordFilter(f.key)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
+                    recordFilter === f.key
+                      ? "bg-[#0F766E] text-white"
+                      : "bg-[#FAF9F6] text-[#476268] hover:bg-slate-100"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <input
+            value={recordSearch}
+            onChange={(e) => setRecordSearch(e.target.value)}
+            placeholder="Tìm theo mã bệnh án, tên thú cưng, tên chủ nuôi, bác sĩ hoặc chẩn đoán..."
+            className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-4 py-2.5 text-xs"
+          />
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#132A2E]/10 uppercase text-[#476268]">
+                  <th className="py-2.5">Mã BA / Thời gian</th>
+                  <th className="py-2.5">Thú cưng &amp; Chủ nuôi</th>
+                  <th className="py-2.5">Bác sĩ khám</th>
+                  <th className="py-2.5">Chẩn đoán (A)</th>
+                  <th className="py-2.5">Trạng thái</th>
+                  <th className="py-2.5 text-right">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#132A2E]/8">
+                {filteredAllRecords.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-[#476268]">
+                      Không tìm thấy hồ sơ ca khám nào phù hợp.
+                    </td>
+                  </tr>
+                )}
+                {filteredAllRecords.map((rec) => {
+                  const locked = rec.isLocked || rec.status === "LOCKED";
+                  return (
+                    <tr key={rec.id} className="hover:bg-[#FAF9F6]">
+                      <td className="py-3 pr-3">
+                        <p className="font-mono font-extrabold text-[#0F766E]">{rec.recordCode}</p>
+                        <p className="text-[11px] text-[#476268]">
+                          {formatDateTimeVn(rec.createdAt)}
+                        </p>
+                      </td>
+                      <td className="py-3 pr-3">
+                        <p className="font-bold text-[#132A2E]">
+                          🐾 {rec.pet ? rec.pet.name : rec.guestPetName}
+                        </p>
+                        <p className="text-[11px] text-[#476268]">
+                          {rec.customer
+                            ? `${rec.customer.fullName} (Thành viên)`
+                            : `${rec.guestOwnerName || "Khách lẻ"} (Khách vãng lai)`}
+                        </p>
+                      </td>
+                      <td className="py-3 pr-3 font-semibold">
+                        {rec.doctor?.fullName || doctor?.fullName || "—"}
+                      </td>
+                      <td className="py-3 pr-3 max-w-xs">
+                        <p className="truncate">{rec.assessment || "Đang cập nhật..."}</p>
+                        {rec.addendums && rec.addendums.length > 0 && (
+                          <p className="text-[10px] font-bold text-amber-700">
+                            +{rec.addendums.length} ghi chú bổ sung
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 pr-3">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                            locked
+                              ? "bg-slate-800 text-white"
+                              : rec.status === "SENT_TO_POS"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          {locked ? (
+                            <>
+                              <Lock className="h-3 w-3" />
+                              Bệnh án đã khóa
+                            </>
+                          ) : rec.status === "SENT_TO_POS" ? (
+                            "Chờ thanh toán"
+                          ) : (
+                            "Đang khám"
+                          )}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openMedicalRecord(rec.id)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Mở chi tiết
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: ĐĂNG KÝ NGHỈ / BÁO SỰ CỐ NGHỈ ĐỘT XUẤT & PHIẾU XUẤT KHO NỘI BỘ */}
       {tab === "LEAVE" && (
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-6 rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm space-y-5">
@@ -1583,7 +1914,9 @@ export function DoctorPortalClient() {
             </p>
 
             <div>
-              <label className="mb-1 block text-xs font-bold">Vật tư tiêu hao</label>
+              <label className="mb-1 block text-xs font-bold">
+                Vật tư tiêu hao / Thuốc dùng nội bộ
+              </label>
               <select
                 value={internalSlipForm.productId}
                 onChange={(e) =>
@@ -1591,9 +1924,15 @@ export function DoctorPortalClient() {
                 }
                 className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm font-semibold"
               >
-                {supplies.map((s) => (
+                {internalUseCandidates.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} (Tồn: {s.stockQuantity} {s.retailUnit})
+                    [
+                    {s.group === "SUPPLY"
+                      ? "VẬT TƯ"
+                      : s.group === "MEDICINE"
+                      ? "THUỐC"
+                      : "DÙNG CHUNG"}
+                    ] {s.name} (Tồn: {s.stockQuantity} {s.retailUnit})
                   </option>
                 ))}
               </select>
