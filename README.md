@@ -4,7 +4,7 @@
 
 **Hợp nhất Trải nghiệm Khách hàng (Public Lookbook & Đặt lịch) · Bệnh án Điện tử S.O.A.P · Quầy Thu ngân POS VietQR · Kho Đa lô FEFO trong một nền tảng duy nhất.**
 
-*Chuyển hóa từ **AURA** (ánh sáng dịu lành) sang **ANIMORA** — chữ `U` lật ngược 180° thành chữ `N` tựa mái vòm che chở thú cưng, mở rộng `IMO` cùng chấm cam san hô ấm áp biểu trưng cho chuẩn mực y khoa gắn liền với tình yêu thương.*
+
 
 [![Next.js](https://img.shields.io/badge/Next.js-15.3.1-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.1.0-149ECA?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
