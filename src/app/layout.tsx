@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, Be_Vietnam_Pro } from "next/font/google";
+import { TactileGrainOverlay } from "@/components/TactileGrainOverlay";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -33,6 +34,7 @@ export default function RootLayout({
       className={`${plusJakartaSans.variable} ${beVietnamPro.variable}`}
     >
       <body className="min-h-screen bg-[#FAF9F6] text-[#132A2E] antialiased selection:bg-[#0F766E]/15 selection:text-[#0F766E]">
+        <TactileGrainOverlay />
         {children}
       </body>
     </html>

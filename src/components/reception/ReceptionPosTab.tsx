@@ -819,15 +819,17 @@ export function ReceptionPosTab({
                   )}
                 </div>
 
-                {/* CẢNH BÁO ĐỎ TỒN KHO <= 0 (VẪN CHO PHÉP THANH TOÁN) */}
+                {/* CẢNH BÁO ĐỎ TỒN KHO <= 0 (0.5S RECOGNITION — VẪN CHO PHÉP THANH TOÁN) */}
                 {zeroStockItemsInInvoice.length > 0 && (
-                  <div className="flex items-start gap-3 rounded-2xl border-2 border-rose-500 bg-rose-50 p-4 text-xs font-bold text-rose-800">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+                  <div className="alert-urgent-card flex items-start gap-3 rounded-2xl p-4 text-xs font-bold text-[#991B1B]">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#DC2626] text-white">
+                      <AlertTriangle className="h-4 w-4 animate-heartbeat" />
+                    </div>
                     <div>
-                      <p className="text-sm font-extrabold">
-                        CẢNH BÁO ĐỎ: MẶT HÀNG TỒN KHO &le; 0 HOẶC KHÔNG ĐỦ TRÊN HỆ THỐNG!
+                      <p className="text-sm font-extrabold text-[#991B1B]">
+                        CẢNH BÁO TỒN KHO &le; 0 / KHÔNG ĐỦ TRÊN HỆ THỐNG!
                       </p>
-                      <p className="mt-0.5 font-normal">
+                      <p className="mt-0.5 font-medium">
                         {zeroStockItemsInInvoice
                           .map(
                             (i) =>
@@ -1416,9 +1418,12 @@ export function ReceptionPosTab({
             </div>
 
             {retailZeroStockItems.length > 0 && (
-              <div className="rounded-xl border-2 border-rose-500 bg-rose-50 p-3 text-xs font-bold text-rose-800">
-                CẢNH BÁO ĐỎ: {retailZeroStockItems.map((r) => r.product.name).join(", ")} đang có
-                tồn kho &le; 0. Vẫn cho phép thanh toán (tồn âm tạm thời).
+              <div className="alert-urgent-card flex items-start gap-2.5 rounded-2xl p-3.5 text-xs font-bold text-[#991B1B]">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#DC2626] animate-heartbeat" />
+                <span>
+                  CẢNH BÁO TỒN KHO &le; 0: {retailZeroStockItems.map((r) => r.product.name).join(", ")}.
+                  Vẫn cho phép thanh toán (tồn âm tạm thời).
+                </span>
               </div>
             )}
 

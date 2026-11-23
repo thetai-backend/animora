@@ -1480,11 +1480,13 @@ export function DoctorPortalClient() {
 
                     {(lowOrZeroStockDrafts.length > 0 ||
                       (selectedMedicineObj && selectedMedicineObj.stockQuantity <= 0)) && (
-                      <div className="flex items-start gap-2.5 rounded-xl border-2 border-rose-500 bg-rose-50 p-3.5 text-xs text-rose-800">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                      <div className="alert-urgent-card flex items-start gap-3 rounded-2xl p-4 text-xs text-[#991B1B]">
+                        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#DC2626] text-white">
+                          <AlertTriangle className="h-4 w-4 animate-heartbeat" />
+                        </div>
                         <div>
                           <p className="font-extrabold">
-                            CẢNH BÁO TỒN KHO ≤ 0 / KHÔNG ĐỦ TRÊN HỆ THỐNG!
+                            CẢNH BÁO TỒN KHO &le; 0 / KHÔNG ĐỦ TRÊN HỆ THỐNG!
                           </p>
                           <p className="mt-0.5">
                             Mặt hàng tồn kho bằng 0 hoặc thấp hơn số lượng kê — hệ thống{" "}

@@ -193,7 +193,8 @@ export function ManagerPortalClient() {
                 <Icon className="h-4 w-4" />
                 <span>{item.label}</span>
                 {item.badge !== undefined && (
-                  <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                  <span className="alert-urgent-badge tabular-nums-strict inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
                     {item.badge}
                   </span>
                 )}

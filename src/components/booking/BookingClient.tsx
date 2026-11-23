@@ -71,13 +71,16 @@ export function BookingClient({
   customerPets,
   services,
   doctors,
+  initialServiceId,
 }: {
   session: SessionPayload | null;
   customerInfo: { fullName: string; phone: string | null; email: string } | null;
   customerPets: PetOption[];
   services: ServiceOption[];
   doctors: DoctorOption[];
+  initialServiceId?: string;
 }) {
+  const defaultServiceId = initialServiceId || services[0]?.id;
   const [mode, setMode] = useState<"MEMBER" | "GUEST">(
     session && customerPets.length > 0 ? "MEMBER" : "GUEST"
   );
@@ -102,7 +105,7 @@ export function BookingClient({
           guestPetSpecies: "DOG",
           guestPetBreed: "",
           guestPetNote: "",
-          serviceIds: services[0] ? [services[0].id] : [],
+          serviceIds: defaultServiceId ? [defaultServiceId] : [],
         },
       ];
     }
@@ -113,7 +116,7 @@ export function BookingClient({
         guestPetSpecies: "DOG",
         guestPetBreed: "",
         guestPetNote: "",
-        serviceIds: services[0] ? [services[0].id] : [],
+        serviceIds: defaultServiceId ? [defaultServiceId] : [],
       },
     ];
   });

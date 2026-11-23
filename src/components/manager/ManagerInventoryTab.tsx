@@ -345,15 +345,24 @@ export function ManagerInventoryTab({
 
   return (
     <div className="space-y-6">
-      {/* KHU VỰC CẢNH BÁO ĐỎ NỔI BẬT: LÔ < 30 NGÀY HẾT HẠN & TỒN KHO ÂM (< 0) */}
+      {/* KHU VỰC CẢNH BÁO ĐỎ SAN HÔ ĐẬM (0.5S RECOGNITION): LÔ < 30 NGÀY HẾT HẠN & TỒN KHO ÂM (< 0) */}
       {(expiringBatches.length > 0 || negativeStockProducts.length > 0) && (
-        <div className="rounded-3xl border-2 border-rose-500 bg-rose-50 p-6 shadow-md space-y-4">
-          <div className="flex items-center gap-2.5 text-rose-800">
-            <AlertTriangle className="h-6 w-6 shrink-0 text-rose-600" />
-            <h2 className="text-lg font-extrabold">
-              CẢNH BÁO KHO KHẨN CẤP ({expiringBatches.length} lô dưới 30 ngày HSD •{" "}
-              {negativeStockProducts.length} mặt hàng tồn kho âm)
-            </h2>
+        <div className="alert-urgent-card rounded-3xl p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 text-[#991B1B]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#DC2626] text-white shadow-md shadow-[#DC2626]/35">
+                <AlertTriangle className="h-6 w-6 animate-heartbeat" />
+              </div>
+              <div>
+                <span className="alert-urgent-badge inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                  Cảnh báo kho khẩn cấp • Nhận diện 0.5s
+                </span>
+                <h2 className="tabular-nums-strict mt-1 font-heading text-lg font-extrabold text-[#991B1B]">
+                  {expiringBatches.length} lô dưới 30 ngày HSD • {negativeStockProducts.length} mặt hàng tồn kho âm
+                </h2>
+              </div>
+            </div>
           </div>
 
           {negativeStockProducts.length > 0 && (
@@ -836,9 +845,9 @@ export function ManagerInventoryTab({
                         <tr
                           className={
                             isNeg
-                              ? "bg-rose-50"
+                              ? "alert-urgent-row"
                               : hasExpiring
-                              ? "bg-rose-50/35 hover:bg-rose-50/60"
+                              ? "bg-[#FFF1F2]/70 hover:bg-[#FFE4E6]/60"
                               : "hover:bg-[#FAF9F6]"
                           }
                         >
@@ -864,17 +873,17 @@ export function ManagerInventoryTab({
                               </span>
                             </div>
                             {isNeg && (
-                              <div className="inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                              <div className="alert-urgent-badge inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold">
                                 Tồn kho âm — Cần kiểm tra nhập bù
                               </div>
                             )}
                             {isZero && (
-                              <div className="inline-block rounded bg-rose-100 px-2 py-0.5 text-[10px] font-extrabold text-rose-700">
+                              <div className="inline-block rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-extrabold text-[#DC2626]">
                                 Hết tồn kho (= 0)
                               </div>
                             )}
                             {hasExpiring && (
-                              <div className="inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                              <div className="alert-urgent-badge inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold">
                                 Có lô &lt; 30 ngày HSD
                               </div>
                             )}

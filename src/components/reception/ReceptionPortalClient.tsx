@@ -633,7 +633,8 @@ export function ReceptionPortalClient() {
             <CalendarClock className="h-4 w-4" />
             Điều phối &amp; Check-in ({bookings.length})
             {emergencyAlerts.length > 0 && (
-              <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] text-white">
+              <span className="alert-urgent-badge inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
                 {emergencyAlerts.length} KHẨN
               </span>
             )}
@@ -706,14 +707,24 @@ export function ReceptionPortalClient() {
          ===================================================================== */}
       {tab === "DISPATCH" && (
         <div className="space-y-6">
-          {/* CẢNH BÁO KHẨN MÀU ĐỎ — BÁC SĨ NGHỈ ĐỘT XUẤT */}
+          {/* CẢNH BÁO KHẨN MÀU ĐỎ SAN HÔ ĐẬM (0.5S RECOGNITION) — BÁC SĨ NGHỈ ĐỘT XUẤT */}
           {emergencyAlerts.length > 0 && (
-            <div className="rounded-3xl border-2 border-rose-500 bg-rose-50 p-6 shadow-md">
-              <div className="flex items-center gap-2.5 text-rose-800">
-                <ShieldAlert className="h-6 w-6 animate-pulse text-rose-600" />
-                <h2 className="text-lg font-extrabold">
-                  CẢNH BÁO KHẨN: Bác sĩ báo sự cố nghỉ đột xuất trùng lịch khách!
-                </h2>
+            <div className="alert-urgent-card rounded-3xl p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 text-[#991B1B]">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#DC2626] text-white shadow-md shadow-[#DC2626]/35">
+                    <ShieldAlert className="h-6 w-6 animate-heartbeat" />
+                  </div>
+                  <div>
+                    <span className="alert-urgent-badge inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider">
+                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                      Cảnh báo khẩn cấp • Nhận diện ngay
+                    </span>
+                    <h2 className="mt-1 font-heading text-lg font-extrabold text-[#991B1B]">
+                      Bác sĩ báo sự cố nghỉ đột xuất trùng lịch khách!
+                    </h2>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-4 space-y-4">
@@ -1522,15 +1533,33 @@ export function ReceptionPortalClient() {
             </div>
           )}
 
-          {/* DANH SÁCH LỊCH HẸN TRONG NGÀY (TÔ ĐỎ QUÁ 20 PHÚT) */}
-          <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm">
+          {/* DANH SÁCH LỊCH HẸN TRONG NGÀY (TÔ ĐỎ QUÁ 20 PHÚT — 0.5S RECOGNITION) */}
+          <div className="tactile-surface rounded-3xl p-7">
+            {bookings.some((b) => b.isLate20Min) && (
+              <div className="alert-urgent-card mb-5 flex items-center justify-between gap-4 rounded-2xl px-5 py-3.5">
+                <div className="flex items-center gap-3 text-[#991B1B]">
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-[#DC2626] animate-heartbeat" />
+                  <p className="text-xs font-extrabold">
+                    CÓ{" "}
+                    <span className="tabular-nums-strict underline">
+                      {bookings.filter((b) => b.isLate20Min).length} LỊCH HẸN TRỄ QUÁ 20 PHÚT
+                    </span>{" "}
+                    chưa Check-in! Vui lòng gọi kiểm tra khách hoặc điều phối bác sĩ sang ca khác.
+                  </p>
+                </div>
+                <span className="alert-urgent-badge shrink-0 rounded-full px-3 py-1 text-[10px] font-extrabold uppercase">
+                  Ưu tiên xử lý
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-extrabold text-[#132A2E]">
-                  Bảng quản lý Tổng lịch đặt ({date})
+                <h2 className="font-heading text-lg font-extrabold text-[#132A2E]">
+                  Bảng quản lý Tổng lịch đặt (<span className="tabular-nums-strict">{date}</span>)
                 </h2>
                 <p className="text-xs text-[#476268]">
-                  Dòng tô <strong className="text-rose-600">Màu Đỏ</strong> là lịch hẹn đã quá 20 phút mà khách chưa Check-in.
+                  Dòng tô <strong className="text-[#DC2626]">Đỏ san hô đậm + viền sáng</strong> là lịch hẹn đã quá 20 phút mà khách chưa Check-in.
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -1572,24 +1601,25 @@ export function ReceptionPortalClient() {
                         key={b.id}
                         className={
                           b.isLate20Min
-                            ? "bg-rose-50 text-rose-950"
+                            ? "alert-urgent-row text-[#7F1D1D]"
                             : "hover:bg-[#FAF9F6]"
                         }
                       >
-                        <td className="py-3.5 pr-3">
+                        <td className="py-3.5 pl-3 pr-3">
                           <span className="font-mono font-extrabold text-[#0F766E]">
                             {b.bookingCode}
                           </span>
-                          <p className="text-xs font-bold">
+                          <p className="tabular-nums-strict text-xs font-bold">
                             {b.startTime} – {b.endTime}
                           </p>
                           {b.isLate20Min && (
-                            <span className="mt-1 inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                            <span className="alert-urgent-badge mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-extrabold">
+                              <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
                               TRỄ QUÁ 20 PHÚT
                             </span>
                           )}
                           {b.isEmergency && (
-                            <span className="mt-1 inline-block rounded bg-rose-700 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                            <span className="alert-urgent-badge mt-1 inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold">
                               CẤP CỨU
                             </span>
                           )}

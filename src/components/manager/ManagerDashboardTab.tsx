@@ -299,7 +299,7 @@ export function ManagerDashboardTab({
                 </span>
                 <TrendingUp className="h-5 w-5 text-teal-200" />
               </div>
-              <p className="mt-3 font-heading text-3xl font-extrabold">
+              <p className="tabular-nums-strict mt-3 font-heading text-3xl font-extrabold">
                 {formatVnd(data.summary.totalRevenue)}
               </p>
               <p className="mt-1.5 text-[11px] text-teal-100">
@@ -320,7 +320,7 @@ export function ManagerDashboardTab({
                   <Receipt className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-3 font-heading text-3xl font-extrabold text-[#132A2E]">
+              <p className="tabular-nums-strict mt-3 font-heading text-3xl font-extrabold text-[#132A2E]">
                 {data.summary.invoiceCount}{" "}
                 <span className="text-sm font-bold text-[#476268]">hóa đơn</span>
               </p>
@@ -339,7 +339,7 @@ export function ManagerDashboardTab({
                   <ClipboardCheck className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-3 font-heading text-3xl font-extrabold text-[#F97316]">
+              <p className="tabular-nums-strict mt-3 font-heading text-3xl font-extrabold text-[#F97316]">
                 {data.summary.completedExamsCount}{" "}
                 <span className="text-sm font-bold text-[#476268]">ca S.O.A.P</span>
               </p>
@@ -357,7 +357,7 @@ export function ManagerDashboardTab({
                   <Users className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-3 font-heading text-3xl font-extrabold text-[#132A2E]">
+              <p className="tabular-nums-strict mt-3 font-heading text-3xl font-extrabold text-[#132A2E]">
                 {data.summary.newCustomersCount}{" "}
                 <span className="text-sm font-bold text-[#476268]">tài khoản</span>
               </p>
@@ -367,31 +367,31 @@ export function ManagerDashboardTab({
             </div>
           </div>
 
-          {/* KHU VỰC CẢNH BÁO VẬN HÀNH NHANH NGAY TRÊN DASHBOARD */}
+          {/* KHU VỰC CẢNH BÁO VẬN HÀNH NHANH NGAY TRÊN DASHBOARD (0.5S RECOGNITION) */}
           <div className="grid grid-cols-12 gap-5">
             <button
               type="button"
               onClick={() => onQuickNavigate?.("INVENTORY")}
               className={`col-span-3 flex flex-col justify-between rounded-3xl border-2 p-5 text-left transition hover:shadow-md ${
                 expiringBatchesCount > 0
-                  ? "border-rose-400 bg-rose-50/70"
+                  ? "alert-urgent-card"
                   : "border-emerald-200 bg-emerald-50/50"
               }`}
             >
               <div className="flex items-center justify-between">
                 <span
                   className={`inline-flex items-center gap-1.5 text-xs font-extrabold uppercase ${
-                    expiringBatchesCount > 0 ? "text-rose-700" : "text-emerald-700"
+                    expiringBatchesCount > 0 ? "text-[#DC2626]" : "text-emerald-700"
                   }`}
                 >
-                  <Clock className="h-4 w-4" />
+                  <Clock className={`h-4 w-4 ${expiringBatchesCount > 0 ? "animate-heartbeat" : ""}`} />
                   Lô sắp hết hạn (&lt;30 ngày)
                 </span>
                 <ArrowRight className="h-4 w-4 text-[#476268]" />
               </div>
               <p
-                className={`mt-3 font-heading text-3xl font-extrabold ${
-                  expiringBatchesCount > 0 ? "text-rose-700" : "text-emerald-700"
+                className={`tabular-nums-strict mt-3 font-heading text-3xl font-extrabold ${
+                  expiringBatchesCount > 0 ? "text-[#DC2626]" : "text-emerald-700"
                 }`}
               >
                 {expiringBatchesCount} <span className="text-sm font-bold">lô hàng</span>
@@ -406,24 +406,24 @@ export function ManagerDashboardTab({
               onClick={() => onQuickNavigate?.("INVENTORY")}
               className={`col-span-3 flex flex-col justify-between rounded-3xl border-2 p-5 text-left transition hover:shadow-md ${
                 negativeStockCount > 0
-                  ? "border-rose-500 bg-rose-50"
+                  ? "alert-urgent-card"
                   : "border-emerald-200 bg-emerald-50/50"
               }`}
             >
               <div className="flex items-center justify-between">
                 <span
                   className={`inline-flex items-center gap-1.5 text-xs font-extrabold uppercase ${
-                    negativeStockCount > 0 ? "text-rose-700" : "text-emerald-700"
+                    negativeStockCount > 0 ? "text-[#DC2626]" : "text-emerald-700"
                   }`}
                 >
-                  <PackageX className="h-4 w-4" />
+                  <PackageX className={`h-4 w-4 ${negativeStockCount > 0 ? "animate-heartbeat" : ""}`} />
                   Tồn kho âm (&lt; 0)
                 </span>
                 <ArrowRight className="h-4 w-4 text-[#476268]" />
               </div>
               <p
-                className={`mt-3 font-heading text-3xl font-extrabold ${
-                  negativeStockCount > 0 ? "text-rose-700" : "text-emerald-700"
+                className={`tabular-nums-strict mt-3 font-heading text-3xl font-extrabold ${
+                  negativeStockCount > 0 ? "text-[#DC2626]" : "text-emerald-700"
                 }`}
               >
                 {negativeStockCount} <span className="text-sm font-bold">mặt hàng</span>

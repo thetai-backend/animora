@@ -8,6 +8,7 @@ interface AnimoraLogoProps {
   size?: "sm" | "md" | "lg";
   interactive?: boolean;
   showReplayHint?: boolean;
+  triggerGlobalPreloader?: boolean;
   className?: string;
 }
 
@@ -22,6 +23,7 @@ export function AnimoraLogo({
   size = "md",
   interactive = true,
   showReplayHint = false,
+  triggerGlobalPreloader = false,
   className = "",
 }: AnimoraLogoProps) {
   const [replayKey, setReplayKey] = useState(0);
@@ -50,6 +52,9 @@ export function AnimoraLogo({
   const handleReplay = () => {
     if (!interactive) return;
     setReplayKey((prev) => prev + 1);
+    if (triggerGlobalPreloader && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("animora:replay-preloader"));
+    }
   };
 
   return (
@@ -63,7 +68,7 @@ export function AnimoraLogo({
           handleReplay();
         }
       }}
-      title={interactive ? "Bấm vào logo để xem lại hiệu ứng AURA → ANIMORA" : undefined}
+      title={interactive ? "Bấm vào logo để xem lại hiệu ứng AURA → ANIMORA (1,8s)" : undefined}
       className={`group inline-flex flex-col select-none ${
         interactive ? "cursor-pointer" : ""
       } ${className}`}
@@ -92,7 +97,6 @@ export function AnimoraLogo({
 
           {/* Chữ U lật 180° theo trục dọc (mái vòm che chở) và biến hình mượt thành chữ N */}
           <span className="relative inline-grid place-items-center" style={{ perspective: 400 }}>
-            {/* Chữ U ban đầu: xuất hiện, lật ngược 180° tạo mái vòm rồi hòa vào N */}
             <motion.span
               aria-hidden="true"
               initial={{ rotateX: 0, opacity: 1, scaleY: 1 }}
@@ -110,7 +114,6 @@ export function AnimoraLogo({
               U
             </motion.span>
 
-            {/* Chữ N mái vòm xuất hiện mượt từ góc lật của U */}
             <motion.span
               initial={{ opacity: 0, scaleY: 0.82 }}
               animate={{

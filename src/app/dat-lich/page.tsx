@@ -6,8 +6,12 @@ import { BookingClient } from "@/components/booking/BookingClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function BookingPage() {
-  const session = await getSession();
+export default async function BookingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ service?: string }>;
+}) {
+  const [session, sp] = await Promise.all([getSession(), searchParams]);
 
   const [services, doctors, customerPets, customerInfo] = await Promise.all([
     prisma.service.findMany({
@@ -39,6 +43,11 @@ export default async function BookingPage() {
       : Promise.resolve(null),
   ]);
 
+  const initialServiceId =
+    sp.service && services.some((s) => s.id === sp.service)
+      ? sp.service
+      : undefined;
+
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-[#132A2E]">
       <StickyHeader session={session} />
@@ -60,6 +69,7 @@ export default async function BookingPage() {
             durationMinutes: s.durationMinutes,
           }))}
           doctors={doctors}
+          initialServiceId={initialServiceId}
         />
       </main>
     </div>

@@ -10,12 +10,24 @@
   --color-accent-hover: #EA580C;
   --color-ink: #132A2E;
   --color-ink-muted: #476268;
+  --color-urgent: #DC2626;
+  --color-urgent-rose: #E11D48;
   --font-heading: var(--font-plus-jakarta-sans), "Plus Jakarta Sans", sans-serif;
   --font-body: var(--font-be-vietnam-pro), "Be Vietnam Pro", sans-serif;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+html.lenis,
+html.lenis body {
+  height: auto;
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
 }
 
 body {
@@ -26,8 +38,156 @@ body {
   overflow-x: hidden;
 }
 
-h1, h2, h3, h4, h5, h6, .font-heading {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-heading {
   font-family: var(--font-plus-jakarta-sans), "Plus Jakarta Sans", sans-serif;
+}
+
+/* ==========================================
+   TACTILE SPATIAL MEDICAL DESIGN UTILITIES
+   ========================================== */
+.tabular-nums-strict {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Kính y khoa mờ (Medical Frosted Glass) */
+.glass-medical {
+  background: rgba(250, 249, 246, 0.78);
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow:
+    0 10px 30px -10px rgba(15, 118, 110, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.glass-medical-card {
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 20px 44px -18px rgba(19, 42, 46, 0.12),
+    0 2px 6px rgba(15, 118, 110, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.glass-dark-pill {
+  background: rgba(19, 42, 46, 0.84);
+  backdrop-filter: blur(20px) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 18px 40px -14px rgba(19, 42, 46, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Thẻ bề mặt Dashboard chuẩn 0ms — không giật, chiều sâu dịu mắt 8 tiếng */
+.tactile-surface {
+  background: #ffffff;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  box-shadow:
+    0 1px 2px rgba(19, 42, 46, 0.04),
+    0 8px 24px -16px rgba(15, 118, 110, 0.12);
+}
+
+/* Lớp giấy y khoa có chiều sâu chạm (Tactile Paper Grid subtle) */
+.medical-dot-grid {
+  background-image: radial-gradient(rgba(15, 118, 110, 0.11) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* ==========================================
+   HỆ THỐNG CẢNH BÁO THỊ GIÁC 0.5S RECOGNITION
+   ========================================== */
+@keyframes urgentGlowPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(220, 38, 38, 0.35),
+      0 0 0 4px rgba(225, 29, 72, 0.14),
+      0 12px 28px -10px rgba(220, 38, 38, 0.28);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1.5px rgba(225, 29, 72, 0.65),
+      0 0 0 8px rgba(225, 29, 72, 0.22),
+      0 14px 32px -8px rgba(220, 38, 38, 0.42);
+  }
+}
+
+@keyframes urgentEntryNudge {
+  0% {
+    transform: translateX(0);
+  }
+  18% {
+    transform: translateX(-3px);
+  }
+  36% {
+    transform: translateX(3px);
+  }
+  54% {
+    transform: translateX(-2px);
+  }
+  72% {
+    transform: translateX(2px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes heartbeatPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  16% {
+    transform: scale(1.38);
+    opacity: 0.92;
+  }
+  32% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  48% {
+    transform: scale(1.24);
+    opacity: 0.95;
+  }
+  65% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.alert-urgent-card {
+  border: 2px solid #DC2626 !important;
+  background: linear-gradient(135deg, #FFF1F2 0%, #FEF2F2 100%) !important;
+  animation:
+    urgentEntryNudge 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) 1,
+    urgentGlowPulse 2.4s ease-in-out infinite;
+}
+
+.alert-urgent-row {
+  background: linear-gradient(90deg, rgba(225, 29, 72, 0.1) 0%, rgba(254, 242, 242, 0.75) 100%) !important;
+  box-shadow: inset 4px 0 0 #DC2626;
+}
+
+.alert-urgent-badge {
+  background: linear-gradient(135deg, #DC2626 0%, #E11D48 100%);
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.22);
+}
+
+.animate-heartbeat {
+  animation: heartbeatPulse 1.8s ease-in-out infinite;
 }
 
 /* Thanh cuộn tinh gọn phù hợp bảng màu ANIMORA */
@@ -65,10 +225,18 @@ h1, h2, h3, h4, h5, h6, .font-heading {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     overflow: visible !important;
+    height: auto !important;
   }
 
-  .no-print {
+  .no-print,
+  .tactile-paper-grain {
     display: none !important;
+  }
+
+  .alert-urgent-card,
+  .animate-heartbeat {
+    animation: none !important;
+    box-shadow: none !important;
   }
 
   .print-a4-sheet {
