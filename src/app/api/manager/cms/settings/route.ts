@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -51,6 +52,9 @@ export async function PUT(request: NextRequest) {
     update: data,
     create: { id: "default", ...data },
   });
+
+  revalidatePath("/");
+  revalidatePath("/dat-lich");
 
   return NextResponse.json({
     settings,

@@ -1790,14 +1790,25 @@ export function DoctorPortalClient() {
                         </span>
                       </td>
                       <td className="py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => openMedicalRecord(rec.id)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0B5D56]"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          Mở chi tiết
-                        </button>
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openMedicalRecord(rec.id)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0B5D56]"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Mở chi tiết
+                          </button>
+                          <a
+                            href={`/in/phieu-kham/${rec.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2.5 py-1.5 text-xs font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            In Đơn thuốc A4
+                          </a>
+                        </div>
                       </td>
                     </tr>
                   );

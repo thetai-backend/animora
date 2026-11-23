@@ -43,6 +43,7 @@ export function ManagerPromotionsTab({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ManagerPromotion | null>(null);
+  const [promoKind, setPromoKind] = useState<"EVENT" | "COUPON">("EVENT");
   const [form, setForm] = useState({
     title: "",
     subtitle: "",
@@ -60,6 +61,7 @@ export function ManagerPromotionsTab({
 
   const openCreate = () => {
     setEditing(null);
+    setPromoKind("EVENT");
     setForm({
       title: "",
       subtitle: "",
@@ -79,6 +81,7 @@ export function ManagerPromotionsTab({
 
   const openEdit = (p: ManagerPromotion) => {
     setEditing(p);
+    setPromoKind(p.code && p.applicableScope === "ALL" ? "COUPON" : "EVENT");
     setForm({
       title: p.title,
       subtitle: p.subtitle || "",
@@ -182,6 +185,49 @@ export function ManagerPromotionsTab({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromoKind("EVENT");
+                    if (form.applicableScope === "ALL") {
+                      setForm({ ...form, applicableScope: "SPA" });
+                    }
+                  }}
+                  className={`rounded-2xl border-2 p-3 text-left transition ${
+                    promoKind === "EVENT"
+                      ? "border-[#0F766E] bg-[#0F766E]/8"
+                      : "border-slate-200 bg-[#FAF9F6]"
+                  }`}
+                >
+                  <p className="font-extrabold text-[#0F766E]">
+                    1. Sự kiện khuyến mãi theo dịch vụ / sản phẩm
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#476268]">
+                    Giảm theo nhóm Y tế, Spa hoặc Shop (Bước 1 tại POS).
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromoKind("COUPON");
+                    setForm({ ...form, applicableScope: "ALL" });
+                  }}
+                  className={`rounded-2xl border-2 p-3 text-left transition ${
+                    promoKind === "COUPON"
+                      ? "border-[#F97316] bg-[#F97316]/8"
+                      : "border-slate-200 bg-[#FAF9F6]"
+                  }`}
+                >
+                  <p className="font-extrabold text-[#EA580C]">
+                    2. Mã giảm giá trên tổng hóa đơn
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#476268]">
+                    Nhập mã ưu đãi (Bước 2 tại POS — cộng dồn sau sự kiện).
+                  </p>
+                </button>
+              </div>
+
               <div className="col-span-2">
                 <label className="mb-1 block font-bold">Tên chương trình / Sự kiện *</label>
                 <input
@@ -195,12 +241,15 @@ export function ManagerPromotionsTab({
 
               <div>
                 <label className="mb-1 block font-bold">
-                  Mã giảm giá (bỏ trống nếu là Sự kiện chọn sẵn)
+                  {promoKind === "COUPON"
+                    ? "Mã giảm giá áp dụng trên tổng hóa đơn *"
+                    : "Mã sự kiện (tùy chọn, bỏ trống nếu chọn trực tiếp tại POS)"}
                 </label>
                 <input
+                  required={promoKind === "COUPON"}
                   value={form.code}
                   onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                  placeholder="VD: SPA25 hoặc MEMBER10"
+                  placeholder={promoKind === "COUPON" ? "VD: MEMBER10" : "VD: SPA25 (không bắt buộc)"}
                   className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 font-mono text-sm font-bold uppercase"
                 />
               </div>

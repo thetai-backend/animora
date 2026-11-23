@@ -4,7 +4,7 @@ import {
   SESSION_COOKIE_NAME,
   UserRole,
   verifySessionToken,
-} from "@/lib/auth";
+} from "@/lib/session-token";
 
 const PROTECTED_PREFIXES: { prefix: string; allowedRoles: UserRole[] }[] = [
   { prefix: "/quan-ly", allowedRoles: ["MANAGER"] },

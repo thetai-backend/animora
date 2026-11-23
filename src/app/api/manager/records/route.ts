@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ error: "Chỉ Quản lý mới có quyền truy cập" }, { status: 403 });
   }
 
-  const [medicalRecords, invoices, auditLogs, customers, pets] = await Promise.all([
+  const [medicalRecords, invoices, auditLogs, customers, pets, notificationLogs] = await Promise.all([
     prisma.medicalRecord.findMany({
       include: {
         doctor: { select: { id: true, fullName: true, title: true } },
@@ -21,6 +21,7 @@ export async function GET() {
             invoiceCode: true,
             status: true,
             totalAmount: true,
+            refundedAmount: true,
             paymentMethod: true,
             items: true,
           },
@@ -66,6 +67,10 @@ export async function GET() {
         address: true,
         isActive: true,
         createdAt: true,
+        pets: {
+          select: { id: true, name: true, species: true, breed: true, status: true },
+          orderBy: { createdAt: "desc" },
+        },
         _count: {
           select: {
             pets: true,
@@ -83,6 +88,10 @@ export async function GET() {
       },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.notificationLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
   ]);
 
   return NextResponse.json({
@@ -91,5 +100,6 @@ export async function GET() {
     auditLogs,
     customers,
     pets,
+    notificationLogs,
   });
 }

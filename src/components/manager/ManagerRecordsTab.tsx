@@ -10,6 +10,8 @@ import {
   Eye,
   X,
   Lock,
+  Mail,
+  Receipt,
 } from "lucide-react";
 import { formatDateTimeVn, formatDateVn, formatSpecies } from "@/lib/format";
 
@@ -21,6 +23,7 @@ export interface ManagerCustomer {
   address: string | null;
   isActive: boolean;
   createdAt: string;
+  pets?: { id: string; name: string; species: string; breed: string | null; status: string }[];
   _count: {
     pets: number;
     customerBookings: number;
@@ -73,22 +76,38 @@ export interface ManagerMedicalRecord {
   } | null;
 }
 
+export interface ManagerNotificationLog {
+  id: string;
+  recipientEmail: string;
+  recipientName: string;
+  petName: string | null;
+  subject: string;
+  body: string;
+  sentByName: string | null;
+  createdAt: string;
+}
+
 export function ManagerRecordsTab({
   customers,
   pets,
   records,
+  notificationLogs = [],
   onReload,
   notify,
 }: {
   customers: ManagerCustomer[];
   pets: ManagerPet[];
   records: ManagerMedicalRecord[];
+  notificationLogs?: ManagerNotificationLog[];
   onReload: () => Promise<void>;
   notify: (msg: string, type?: "ok" | "err") => void;
 }) {
-  const [subTab, setSubTab] = useState<"RECORDS" | "PETS" | "CUSTOMERS">("RECORDS");
+  const [subTab, setSubTab] = useState<"RECORDS" | "PETS" | "CUSTOMERS" | "NOTIFICATIONS">(
+    "RECORDS"
+  );
   const [search, setSearch] = useState("");
   const [selectedRecord, setSelectedRecord] = useState<ManagerMedicalRecord | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<ManagerCustomer | null>(null);
 
   const handleTogglePetStatus = async (pet: ManagerPet, nextStatus: "ALIVE" | "DECEASED") => {
     const res = await fetch(`/api/manager/pets/${pet.id}`, {
@@ -127,10 +146,16 @@ export function ManagerRecordsTab({
     return hay.includes(q);
   });
 
+  const filteredLogs = notificationLogs.filter((l) => {
+    if (!q) return true;
+    const hay = `${l.recipientName} ${l.recipientEmail} ${l.petName || ""} ${l.subject}`.toLowerCase();
+    return hay.includes(q);
+  });
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-2xl border border-[#0F766E]/15 bg-white p-1">
+        <div className="inline-flex flex-wrap rounded-2xl border border-[#0F766E]/15 bg-white p-1">
           <button
             type="button"
             onClick={() => setSubTab("RECORDS")}
@@ -139,7 +164,7 @@ export function ManagerRecordsTab({
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            Hồ sơ ca khám S.O.A.P ({records.length})
+            Hồ sơ Ca khám S.O.A.P ({records.length})
           </button>
           <button
             type="button"
@@ -149,7 +174,7 @@ export function ManagerRecordsTab({
             }`}
           >
             <PawPrint className="h-3.5 w-3.5" />
-            Toàn bộ Thú cưng ({pets.length})
+            Hồ sơ Thú cưng ({pets.length})
           </button>
           <button
             type="button"
@@ -159,7 +184,17 @@ export function ManagerRecordsTab({
             }`}
           >
             <Users className="h-3.5 w-3.5" />
-            Khách hàng thành viên ({customers.length})
+            Hồ sơ Khách hàng ({customers.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab("NOTIFICATIONS")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-extrabold ${
+              subTab === "NOTIFICATIONS" ? "bg-[#0D9488] text-white" : "text-[#476268]"
+            }`}
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Nhật ký Email nhắc lịch ({notificationLogs.length})
           </button>
         </div>
 
@@ -170,6 +205,85 @@ export function ManagerRecordsTab({
           className="w-80 rounded-xl border border-[#132A2E]/15 bg-white px-4 py-2 text-xs"
         />
       </div>
+
+      {/* Modal xem chi tiết Khách hàng */}
+      {selectedCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#132A2E]/60 p-6 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-3xl border border-[#0F766E]/20 bg-white p-7 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-start justify-between border-b border-[#132A2E]/10 pb-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-[#0F766E]">
+                  Hồ sơ Khách hàng — {selectedCustomer.fullName}
+                </h3>
+                <p className="text-[#476268]">
+                  Email: <strong>{selectedCustomer.email}</strong> • SĐT:{" "}
+                  <strong>{selectedCustomer.phone || "—"}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCustomer(null)}
+                className="rounded-lg p-1.5 text-[#476268] hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-xl bg-[#FAF9F6] p-3">
+                <p className="text-[10px] text-[#476268]">Số thú cưng</p>
+                <p className="text-base font-extrabold text-[#0F766E]">
+                  {selectedCustomer._count.pets} bé
+                </p>
+              </div>
+              <div className="rounded-xl bg-[#FAF9F6] p-3">
+                <p className="text-[10px] text-[#476268]">Lịch đặt</p>
+                <p className="text-base font-extrabold text-[#132A2E]">
+                  {selectedCustomer._count.customerBookings}
+                </p>
+              </div>
+              <div className="rounded-xl bg-[#FAF9F6] p-3">
+                <p className="text-[10px] text-[#476268]">Hóa đơn</p>
+                <p className="text-base font-extrabold text-[#F97316]">
+                  {selectedCustomer._count.customerInvoices}
+                </p>
+              </div>
+            </div>
+            <p className="text-[#476268]">
+              Địa chỉ: <strong className="text-[#132A2E]">{selectedCustomer.address || "—"}</strong>{" "}
+              • Ngày tham gia: <strong>{formatDateVn(selectedCustomer.createdAt)}</strong>
+            </p>
+            <div>
+              <p className="font-extrabold text-[#132A2E]">Danh sách Thú cưng:</p>
+              <div className="mt-2 space-y-1.5">
+                {(selectedCustomer.pets || []).length === 0 ? (
+                  <p className="text-[#476268]">Khách chưa thêm thú cưng nào.</p>
+                ) : (
+                  (selectedCustomer.pets || []).map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between rounded-xl bg-[#FAF9F6] px-3 py-2"
+                    >
+                      <span>
+                        <strong>🐾 {p.name}</strong> ({formatSpecies(p.species)}
+                        {p.breed ? ` • ${p.breed}` : ""})
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                          p.status === "DECEASED"
+                            ? "bg-slate-700 text-white"
+                            : "bg-emerald-100 text-emerald-800"
+                        }`}
+                      >
+                        {p.status === "DECEASED" ? "Đã mất" : "Đang chăm sóc"}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal xem chi tiết Bệnh án S.O.A.P */}
       {selectedRecord && (
@@ -183,7 +297,8 @@ export function ManagerRecordsTab({
                 <p className="text-[#476268]">
                   Thú cưng: <strong>{selectedRecord.pet?.name || selectedRecord.guestPetName}</strong> • Chủ nuôi:{" "}
                   <strong>
-                    {selectedRecord.customer?.fullName || `${selectedRecord.guestOwnerName} (Khách vãng lai)`}
+                    {selectedRecord.customer?.fullName ||
+                      `${selectedRecord.guestOwnerName} (Khách vãng lai)`}
                   </strong>{" "}
                   • BS: <strong>{selectedRecord.doctor.fullName}</strong>
                 </p>
@@ -195,8 +310,18 @@ export function ManagerRecordsTab({
                   className="inline-flex items-center gap-1 rounded-xl bg-[#0F766E] px-3 py-1.5 font-bold text-white"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  In Phiếu khám A4
+                  In Phiếu khám &amp; Đơn thuốc A4
                 </Link>
+                {selectedRecord.invoice && (
+                  <Link
+                    href={`/in/hoa-don/${selectedRecord.invoice.id}`}
+                    target="_blank"
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#F97316] px-3 py-1.5 font-bold text-white"
+                  >
+                    <Receipt className="h-3.5 w-3.5" />
+                    In Hóa đơn A4
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => setSelectedRecord(null)}
@@ -237,7 +362,9 @@ export function ManagerRecordsTab({
               </div>
               <div className="rounded-xl bg-emerald-50 p-3">
                 <p className="font-extrabold text-[#0F766E]">A (Chẩn đoán):</p>
-                <p className="mt-1 whitespace-pre-line font-bold">{selectedRecord.assessment || "—"}</p>
+                <p className="mt-1 whitespace-pre-line font-bold">
+                  {selectedRecord.assessment || "—"}
+                </p>
               </div>
               <div className="rounded-xl bg-[#FAF9F6] p-3">
                 <p className="font-extrabold text-[#0F766E]">P (Phác đồ &amp; Dặn dò):</p>
@@ -262,7 +389,7 @@ export function ManagerRecordsTab({
       {subTab === "RECORDS" && (
         <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-6 shadow-sm">
           <h3 className="text-base font-extrabold text-[#132A2E]">
-            Toàn bộ Hồ sơ ca khám S.O.A.P (Bao gồm Thành viên &amp; Khách vãng lai)
+            Toàn bộ Hồ sơ Ca khám S.O.A.P (Bao gồm Thành viên &amp; Khách vãng lai)
           </h3>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -295,11 +422,18 @@ export function ManagerRecordsTab({
                       <p className="text-[11px] text-[#476268]">
                         {r.customer
                           ? `${r.customer.fullName} (Thành viên)`
-                          : `${r.guestOwnerName || "Khách lẻ"} (Vãng lai)`}
+                          : `${r.guestOwnerName || "Khách lẻ"} (Khách vãng lai)`}
                       </p>
                     </td>
                     <td className="py-3 font-semibold">{r.doctor.fullName}</td>
-                    <td className="py-3 max-w-xs truncate">{r.assessment || "—"}</td>
+                    <td className="py-3 max-w-xs">
+                      <p className="truncate">{r.assessment || "—"}</p>
+                      {r.addendums.length > 0 && (
+                        <p className="text-[10px] font-bold text-amber-700">
+                          +{r.addendums.length} ghi chú bổ sung
+                        </p>
+                      )}
+                    </td>
                     <td className="py-3">
                       {r.status === "LOCKED" ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 font-bold text-emerald-800">
@@ -332,8 +466,18 @@ export function ManagerRecordsTab({
                           className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2.5 py-1 font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
                         >
                           <Printer className="h-3.5 w-3.5" />
-                          In A4
+                          Đơn thuốc A4
                         </Link>
+                        {r.invoice && (
+                          <Link
+                            href={`/in/hoa-don/${r.invoice.id}`}
+                            target="_blank"
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#F97316]/30 bg-white px-2.5 py-1 font-bold text-[#EA580C] hover:bg-[#F97316]/10"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            HĐ A4
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -350,7 +494,7 @@ export function ManagerRecordsTab({
             Toàn bộ Hồ sơ Thú cưng (Quản lý trạng thái Đang chăm sóc / Đã mất)
           </h3>
           <p className="text-xs text-[#476268]">
-            Khi đổi trạng thái thú cưng sang <strong>Đã mất</strong>, hệ thống giữ nguyên lịch sử khám nhưng TỰ ĐỘNG NGẮT toàn bộ danh sách nhắc hẹn &amp; email tự động.
+            Khi đổi trạng thái thú cưng sang <strong>Đã mất</strong>, hệ thống giữ nguyên lịch sử khám nhưng TỰ ĐỘNG NGẮT 100% danh sách nhắc hẹn &amp; Email nhắc lịch.
           </p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -368,7 +512,9 @@ export function ManagerRecordsTab({
                 {filteredPets.map((pet) => (
                   <tr
                     key={pet.id}
-                    className={pet.status === "DECEASED" ? "bg-slate-100/70" : "hover:bg-[#FAF9F6]"}
+                    className={
+                      pet.status === "DECEASED" ? "bg-slate-100/70" : "hover:bg-[#FAF9F6]"
+                    }
                   >
                     <td className="py-3">
                       <p className="font-extrabold text-[#132A2E]">{pet.name}</p>
@@ -378,7 +524,9 @@ export function ManagerRecordsTab({
                     </td>
                     <td className="py-3">
                       <p className="font-bold">{pet.owner.fullName}</p>
-                      <p className="text-[11px] text-[#476268]">{pet.owner.phone || pet.owner.email}</p>
+                      <p className="text-[11px] text-[#476268]">
+                        {pet.owner.phone || pet.owner.email}
+                      </p>
                     </td>
                     <td className="py-3 max-w-xs text-[11px] text-[#476268]">
                       <div>Tiêm: {pet.vaccinationHistory || "—"}</div>
@@ -426,7 +574,7 @@ export function ManagerRecordsTab({
       {subTab === "CUSTOMERS" && (
         <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-6 shadow-sm">
           <h3 className="text-base font-extrabold text-[#132A2E]">
-            Danh sách Khách hàng Thành viên ({filteredCustomers.length})
+            Hồ sơ Khách hàng Thành viên ({filteredCustomers.length})
           </h3>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -437,7 +585,7 @@ export function ManagerRecordsTab({
                   <th className="py-2.5">Địa chỉ</th>
                   <th className="py-2.5 text-center">Thú cưng</th>
                   <th className="py-2.5 text-center">Lịch đặt / Hóa đơn</th>
-                  <th className="py-2.5 text-right">Ngày tham gia</th>
+                  <th className="py-2.5 text-right">Chi tiết</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#132A2E]/8">
@@ -455,9 +603,64 @@ export function ManagerRecordsTab({
                     <td className="py-3 text-center font-bold">
                       {c._count.customerBookings} lịch • {c._count.customerInvoices} HĐ
                     </td>
-                    <td className="py-3 text-right text-[#476268]">{formatDateVn(c.createdAt)}</td>
+                    <td className="py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCustomer(c)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Xem hồ sơ
+                      </button>
+                    </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {subTab === "NOTIFICATIONS" && (
+        <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-6 shadow-sm">
+          <h3 className="flex items-center gap-2 text-base font-extrabold text-[#132A2E]">
+            <Mail className="h-5 w-5 text-[#0F766E]" />
+            Nhật ký Email nhắc lịch tái khám đã gửi — NotificationLog ({filteredLogs.length})
+          </h3>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#132A2E]/10 uppercase text-[#476268]">
+                  <th className="py-2.5">Thời gian</th>
+                  <th className="py-2.5">Khách hàng nhận</th>
+                  <th className="py-2.5">Thú cưng</th>
+                  <th className="py-2.5">Tiêu đề &amp; Nội dung</th>
+                  <th className="py-2.5">Người gửi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#132A2E]/8">
+                {filteredLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-[#FAF9F6]">
+                    <td className="py-3 text-[#476268]">{formatDateTimeVn(log.createdAt)}</td>
+                    <td className="py-3">
+                      <p className="font-bold text-[#132A2E]">{log.recipientName}</p>
+                      <p className="font-mono text-[11px] text-[#0F766E]">{log.recipientEmail}</p>
+                    </td>
+                    <td className="py-3 font-bold">{log.petName || "—"}</td>
+                    <td className="py-3 max-w-md">
+                      <p className="font-bold text-[#132A2E]">{log.subject}</p>
+                      <p className="line-clamp-2 text-[11px] text-[#476268]">{log.body}</p>
+                    </td>
+                    <td className="py-3 text-[#476268]">{log.sentByName || "Hệ thống"}</td>
+                  </tr>
+                ))}
+                {filteredLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-[#476268]">
+                      Chưa có lượt gửi Email nhắc lịch nào được ghi nhận.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

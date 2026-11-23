@@ -606,6 +606,27 @@ export function ReceptionPosTab({
                 </ul>
               </div>
             )}
+
+            <div className="flex justify-end gap-2 border-t border-[#132A2E]/10 pt-3">
+              <Link
+                href={`/in/hoa-don/${inspectPaidInvoice.id}`}
+                target="_blank"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F766E] px-4 py-2 font-extrabold text-white hover:bg-[#0B5D56]"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                In Hóa đơn A4
+              </Link>
+              {inspectPaidInvoice.medicalRecord && (
+                <Link
+                  href={`/in/phieu-kham/${inspectPaidInvoice.medicalRecord.id}`}
+                  target="_blank"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#F97316] px-4 py-2 font-extrabold text-white hover:bg-[#EA580C]"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  In Phiếu khám &amp; Đơn thuốc A4
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -747,8 +768,18 @@ export function ReceptionPosTab({
                         className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2 py-1 text-[11px] font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
                       >
                         <Printer className="h-3 w-3" />
-                        In A4
+                        HĐ A4
                       </Link>
+                      {inv.medicalRecord && (
+                        <Link
+                          href={`/in/phieu-kham/${inv.medicalRecord.id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#F97316]/30 bg-white px-2 py-1 text-[11px] font-bold text-[#EA580C] hover:bg-[#F97316]/10"
+                        >
+                          <FileText className="h-3 w-3" />
+                          Đơn thuốc
+                        </Link>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1691,8 +1722,18 @@ export function ReceptionPosTab({
                           className="inline-flex items-center gap-1 rounded-lg border border-[#0F766E]/25 bg-white px-2.5 py-1 font-bold text-[#0F766E] hover:bg-[#0F766E]/10"
                         >
                           <Printer className="h-3.5 w-3.5" />
-                          In A4
+                          In Hóa đơn A4
                         </Link>
+                        {inv.medicalRecord && (
+                          <Link
+                            href={`/in/phieu-kham/${inv.medicalRecord.id}`}
+                            target="_blank"
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#F97316]/30 bg-white px-2.5 py-1 font-bold text-[#EA580C] hover:bg-[#F97316]/10"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            In Phiếu khám &amp; Đơn thuốc A4
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -30,6 +30,7 @@ import {
   ManagerRecordsTab,
   type ManagerCustomer,
   type ManagerMedicalRecord,
+  type ManagerNotificationLog,
   type ManagerPet,
 } from "./ManagerRecordsTab";
 import { ManagerStaffTab, type StaffMember } from "./ManagerStaffTab";
@@ -55,6 +56,7 @@ type ManagerTabKey =
 
 export function ManagerPortalClient() {
   const [tab, setTab] = useState<ManagerTabKey>("DASHBOARD");
+  const [invoiceSubTab, setInvoiceSubTab] = useState<"LIST" | "AUDIT">("LIST");
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
 
@@ -72,6 +74,7 @@ export function ManagerPortalClient() {
   const [auditLogs, setAuditLogs] = useState<FlatAuditLog[]>([]);
   const [customers, setCustomers] = useState<ManagerCustomer[]>([]);
   const [pets, setPets] = useState<ManagerPet[]>([]);
+  const [notificationLogs, setNotificationLogs] = useState<ManagerNotificationLog[]>([]);
 
   // Staff, Promotions, CMS
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -110,6 +113,7 @@ export function ManagerPortalClient() {
     setAuditLogs(recRes.auditLogs || []);
     setCustomers(recRes.customers || []);
     setPets(recRes.pets || []);
+    setNotificationLogs(recRes.notificationLogs || []);
 
     setStaff(staffRes.staff || []);
     setPromotions(promoRes.promotions || []);
@@ -123,6 +127,16 @@ export function ManagerPortalClient() {
   }, []);
 
   const alertCount = expiringBatches.length + negativeStockProducts.length;
+
+  const handleQuickNavigate = (
+    targetTab: "INVENTORY" | "INVOICES",
+    subTab?: "LIST" | "AUDIT"
+  ) => {
+    if (targetTab === "INVOICES" && subTab) {
+      setInvoiceSubTab(subTab);
+    }
+    setTab(targetTab);
+  };
 
   return (
     <div className="space-y-6">
@@ -166,7 +180,10 @@ export function ManagerPortalClient() {
               <button
                 key={item.key}
                 type="button"
-                onClick={() => setTab(item.key as ManagerTabKey)}
+                onClick={() => {
+                  if (item.key === "INVOICES") setInvoiceSubTab("LIST");
+                  setTab(item.key as ManagerTabKey);
+                }}
                 className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition ${
                   tab === item.key
                     ? "bg-[#0F766E] text-white shadow-xs"
@@ -195,7 +212,15 @@ export function ManagerPortalClient() {
         </button>
       </div>
 
-      {tab === "DASHBOARD" && <ManagerDashboardTab refreshSignal={refreshSignal} />}
+      {tab === "DASHBOARD" && (
+        <ManagerDashboardTab
+          refreshSignal={refreshSignal}
+          expiringBatchesCount={expiringBatches.length}
+          negativeStockCount={negativeStockProducts.length}
+          recentAuditLogs={auditLogs.slice(0, 5)}
+          onQuickNavigate={handleQuickNavigate}
+        />
+      )}
 
       {tab === "INVENTORY" && (
         <ManagerInventoryTab
@@ -214,6 +239,7 @@ export function ManagerPortalClient() {
         <ManagerInvoicesTab
           invoices={invoices}
           auditLogs={auditLogs}
+          initialSubTab={invoiceSubTab}
           onReload={loadAll}
           notify={notify}
         />
@@ -224,6 +250,7 @@ export function ManagerPortalClient() {
           customers={customers}
           pets={pets}
           records={records}
+          notificationLogs={notificationLogs}
           onReload={loadAll}
           notify={notify}
         />

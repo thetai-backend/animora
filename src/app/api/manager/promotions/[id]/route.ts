@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -73,6 +74,8 @@ export async function PATCH(
     },
   });
 
+  revalidatePath("/");
+
   return NextResponse.json({
     promotion: updated,
     message: `Đã cập nhật chương trình "${updated.title}"!`,
@@ -90,5 +93,6 @@ export async function DELETE(
 
   const { id } = await context.params;
   await prisma.promotion.delete({ where: { id } });
+  revalidatePath("/");
   return NextResponse.json({ ok: true, message: "Đã xóa sự kiện khuyến mãi!" });
 }

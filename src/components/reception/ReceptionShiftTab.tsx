@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Banknote, QrCode, Printer, FileText, RefreshCw } from "lucide-react";
+import { Banknote, QrCode, Printer, FileText, RefreshCw, AlertTriangle } from "lucide-react";
 import { formatDateTimeVn, formatVnd } from "@/lib/format";
 
 interface ShiftData {
@@ -12,9 +12,13 @@ interface ShiftData {
   grandTotal: number;
   cashCount: number;
   vietQrCount: number;
+  cancelledCount: number;
+  cancelledTotal: number;
+  refundedTotal: number;
   invoices: {
     id: string;
     invoiceCode: string;
+    status: string;
     paidAt: string | null;
     customerName: string;
     petSummary: string | null;
@@ -22,6 +26,8 @@ interface ShiftData {
     cashierName: string;
     paymentMethod: string | null;
     totalAmount: number;
+    refundedAmount: number;
+    netAmount: number;
     medicalRecordId: string | null;
   }[];
 }
@@ -42,7 +48,9 @@ export function ReceptionShiftTab() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/reports/revenue?period=DAY&date=${encodeURIComponent(targetDate)}`
+        `/api/reports/revenue?period=DAY&date=${encodeURIComponent(
+          targetDate
+        )}&shiftDate=${encodeURIComponent(targetDate)}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -69,7 +77,7 @@ export function ReceptionShiftTab() {
             Tách rạch ròi Tổng Tiền mặt tại két và Tổng Chuyển khoản VietQR để bàn giao ca không sai sót.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             type="date"
             value={date}
@@ -84,6 +92,14 @@ export function ReceptionShiftTab() {
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Cập nhật
           </button>
+          <Link
+            href={`/in/chot-ca?date=${encodeURIComponent(date)}`}
+            target="_blank"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#F97316] px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-[#EA580C]"
+          >
+            <Printer className="h-4 w-4" />
+            In Bảng chốt ca A4
+          </Link>
         </div>
       </div>
 
@@ -93,7 +109,7 @@ export function ReceptionShiftTab() {
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
               <div className="flex items-center gap-2 text-emerald-800">
                 <Banknote className="h-5 w-5" />
-                <span className="text-xs font-extrabold uppercase">Tổng Tiền mặt</span>
+                <span className="text-xs font-extrabold uppercase">Tổng thu Tiền mặt</span>
               </div>
               <p className="mt-2 font-heading text-3xl font-extrabold text-emerald-900">
                 {formatVnd(shift.cashTotal)}
@@ -114,16 +130,27 @@ export function ReceptionShiftTab() {
 
             <div className="rounded-2xl bg-[#0F766E] p-5 text-white">
               <span className="text-xs font-extrabold uppercase text-teal-100">
-                Tổng doanh thu chốt ca ({shift.date})
+                Tổng thực thu chốt ca ({shift.date})
               </span>
               <p className="mt-2 font-heading text-3xl font-extrabold">
                 {formatVnd(shift.grandTotal)}
               </p>
               <p className="mt-1 text-xs text-teal-100">
-                Tổng cộng {shift.cashCount + shift.vietQrCount} hóa đơn đã thu
+                Tổng cộng {shift.cashCount + shift.vietQrCount} hóa đơn hợp lệ
               </p>
             </div>
           </div>
+
+          {(shift.cancelledCount > 0 || shift.refundedTotal > 0) && (
+            <div className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+              <span>
+                Trong ngày có <strong>{shift.cancelledCount}</strong> hóa đơn đã hủy (
+                {formatVnd(shift.cancelledTotal)}) và tổng hoàn trả Shop{" "}
+                <strong>{formatVnd(shift.refundedTotal)}</strong> — đã trừ khỏi tổng thực thu bên trên.
+              </span>
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -132,15 +159,21 @@ export function ReceptionShiftTab() {
                   <th className="py-2.5">Mã HĐ</th>
                   <th className="py-2.5">Giờ thu</th>
                   <th className="py-2.5">Khách hàng</th>
-                  <th className="py-2.5">Thu ngân</th>
                   <th className="py-2.5">Phương thức</th>
+                  <th className="py-2.5">Trạng thái</th>
+                  <th className="py-2.5">Người thu</th>
                   <th className="py-2.5 text-right">Thực thu</th>
                   <th className="py-2.5 text-right">In A4</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#132A2E]/8">
                 {shift.invoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-[#FAF9F6]">
+                  <tr
+                    key={inv.id}
+                    className={
+                      inv.status === "CANCELLED" ? "bg-rose-50/50" : "hover:bg-[#FAF9F6]"
+                    }
+                  >
                     <td className="py-3 font-mono font-extrabold text-[#0F766E]">
                       {inv.invoiceCode}
                     </td>
@@ -149,7 +182,6 @@ export function ReceptionShiftTab() {
                       <p className="font-bold text-[#132A2E]">{inv.customerName}</p>
                       <p className="text-[11px] text-[#476268]">{inv.petSummary || "Bán lẻ"}</p>
                     </td>
-                    <td className="py-3">{inv.cashierName}</td>
                     <td className="py-3">
                       <span
                         className={`rounded-lg px-2.5 py-1 text-[11px] font-extrabold ${
@@ -161,8 +193,26 @@ export function ReceptionShiftTab() {
                         {inv.paymentMethod === "VIETQR" ? "VietQR" : "Tiền mặt"}
                       </span>
                     </td>
+                    <td className="py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ${
+                          inv.status === "PAID"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : inv.status === "PARTIALLY_RETURNED"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-rose-600 text-white"
+                        }`}
+                      >
+                        {inv.status === "PAID"
+                          ? "Đã thanh toán"
+                          : inv.status === "PARTIALLY_RETURNED"
+                          ? `Hoàn Shop -${formatVnd(inv.refundedAmount)}`
+                          : "Đã hủy"}
+                      </span>
+                    </td>
+                    <td className="py-3">{inv.cashierName}</td>
                     <td className="py-3 text-right font-extrabold text-[#132A2E]">
-                      {formatVnd(inv.totalAmount)}
+                      {formatVnd(inv.netAmount)}
                     </td>
                     <td className="py-3 text-right">
                       <div className="flex justify-end gap-1.5">
@@ -181,7 +231,7 @@ export function ReceptionShiftTab() {
                             className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-bold text-[#132A2E] hover:bg-slate-50"
                           >
                             <FileText className="h-3 w-3" />
-                            Phiếu khám
+                            Đơn thuốc
                           </Link>
                         )}
                       </div>
@@ -190,7 +240,7 @@ export function ReceptionShiftTab() {
                 ))}
                 {shift.invoices.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-[#476268]">
+                    <td colSpan={8} className="py-8 text-center text-[#476268]">
                       Chưa có hóa đơn nào trong ngày {shift.date}.
                     </td>
                   </tr>

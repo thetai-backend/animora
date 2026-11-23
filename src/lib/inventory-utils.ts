@@ -126,7 +126,8 @@ export async function deductStockFEFO(params: {
 }
 
 /**
- * Hoàn kho chuẩn xác về đúng các lô hàng đã trừ khi Quản lý Hủy hóa đơn / Trả hàng Shop (Rule 11).
+ * Hoàn kho chuẩn xác về đúng các lô hàng đã trừ FEFO khi Quản lý Hủy toàn bộ hóa đơn (Rule 11).
+ * Tự động trừ phần đã hoàn trả trước đó (nếu từng có trả hàng Shop từng phần) để không bao giờ cộng thừa.
  */
 export async function restoreStockFromInvoiceCancel(params: {
   invoiceId: string;
@@ -139,22 +140,39 @@ export async function restoreStockFromInvoiceCancel(params: {
   const { invoiceId, invoiceCode, reason, actorId, actorName } = params;
   const db: DbClient = params.tx ?? prisma;
 
-  const saleTxs = await db.stockTransaction.findMany({
-    where: {
-      referenceId: invoiceId,
-      type: "SALE_DEDUCT",
-    },
-    include: {
-      product: { select: { id: true, name: true, retailUnit: true } },
-      batch: { select: { id: true, batchNumber: true } },
-    },
-  });
+  const [saleTxs, prevReturnTxs] = await Promise.all([
+    db.stockTransaction.findMany({
+      where: { referenceId: invoiceId, type: "SALE_DEDUCT" },
+      include: {
+        product: { select: { id: true, name: true, retailUnit: true } },
+        batch: { select: { id: true, batchNumber: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    db.stockTransaction.findMany({
+      where: { referenceId: invoiceId, type: "RETURN" },
+      select: { productId: true, batchId: true, quantityChange: true },
+    }),
+  ]);
+
+  // Tính số lượng đã hoàn trước đó theo từng (productId, batchId)
+  const returnedMap = new Map<string, number>();
+  for (const r of prevReturnTxs) {
+    const key = `${r.productId}::${r.batchId || "NONE"}`;
+    returnedMap.set(key, (returnedMap.get(key) || 0) + Math.abs(r.quantityChange));
+  }
 
   const restoredDetails: string[] = [];
   let restoredCount = 0;
 
   for (const txRow of saleTxs) {
-    const qtyToRestore = Math.abs(txRow.quantityChange);
+    const deductedQty = Math.abs(txRow.quantityChange);
+    const key = `${txRow.productId}::${txRow.batchId || "NONE"}`;
+    const alreadyReturned = returnedMap.get(key) || 0;
+    const consumeFromReturned = Math.min(deductedQty, alreadyReturned);
+    returnedMap.set(key, alreadyReturned - consumeFromReturned);
+
+    const qtyToRestore = deductedQty - consumeFromReturned;
     if (qtyToRestore <= 0) continue;
 
     if (txRow.batchId) {
@@ -193,6 +211,126 @@ export async function restoreStockFromInvoiceCancel(params: {
         txRow.batch ? ` (Lô ${txRow.batch.batchNumber})` : ""
       }`
     );
+  }
+
+  return { restoredCount, restoredDetails };
+}
+
+/**
+ * Hoàn kho chuẩn xác cho chế độ "Khách trả lại sản phẩm Shop cụ thể trong hóa đơn" (Rule 11).
+ * Đọc lại đúng các dòng StockTransaction xuất FEFO của sản phẩm đó trong hóa đơn để cộng trả về đúng lô ban đầu.
+ */
+export async function restoreStockForPartialReturn(params: {
+  invoiceId: string;
+  invoiceCode: string;
+  productId: string;
+  quantity: number;
+  reason: string;
+  actorId: string;
+  actorName: string;
+  tx: DbClient;
+}): Promise<{ restoredCount: number; restoredDetails: string[] }> {
+  const { invoiceId, invoiceCode, productId, quantity, reason, actorId, actorName, tx: db } = params;
+  if (quantity <= 0) return { restoredCount: 0, restoredDetails: [] };
+
+  const [saleTxs, prevReturnTxs, product] = await Promise.all([
+    db.stockTransaction.findMany({
+      where: { referenceId: invoiceId, productId, type: "SALE_DEDUCT" },
+      include: { batch: { select: { id: true, batchNumber: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    db.stockTransaction.findMany({
+      where: { referenceId: invoiceId, productId, type: "RETURN" },
+      select: { batchId: true, quantityChange: true },
+    }),
+    db.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true, retailUnit: true },
+    }),
+  ]);
+
+  if (!product) return { restoredCount: 0, restoredDetails: [] };
+
+  const alreadyReturnedByBatch = new Map<string, number>();
+  for (const r of prevReturnTxs) {
+    const k = r.batchId || "NONE";
+    alreadyReturnedByBatch.set(k, (alreadyReturnedByBatch.get(k) || 0) + Math.abs(r.quantityChange));
+  }
+
+  let remainingToRestore = quantity;
+  const restoredDetails: string[] = [];
+  let restoredCount = 0;
+
+  for (const txRow of saleTxs) {
+    if (remainingToRestore <= 0) break;
+    const deducted = Math.abs(txRow.quantityChange);
+    const k = txRow.batchId || "NONE";
+    const already = alreadyReturnedByBatch.get(k) || 0;
+    const used = Math.min(deducted, already);
+    alreadyReturnedByBatch.set(k, already - used);
+
+    const availableFromTx = deducted - used;
+    if (availableFromTx <= 0) continue;
+
+    const restoreNow = Math.min(availableFromTx, remainingToRestore);
+
+    if (txRow.batchId) {
+      const batch = await db.inventoryBatch.findUnique({ where: { id: txRow.batchId } });
+      if (batch) {
+        await db.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { remainingQuantity: { increment: restoreNow } },
+        });
+      }
+    }
+
+    await db.stockTransaction.create({
+      data: {
+        productId,
+        batchId: txRow.batchId,
+        type: "RETURN",
+        quantityChange: restoreNow,
+        referenceId: invoiceId,
+        note: `Hoàn kho trả hàng Shop HĐ ${invoiceCode}${
+          txRow.batch ? ` (Lô ${txRow.batch.batchNumber})` : " (Bù tồn âm)"
+        } — Lý do: ${reason}`,
+        createdById: actorId,
+        createdByName: actorName,
+      },
+    });
+
+    restoredCount += restoreNow;
+    remainingToRestore -= restoreNow;
+    restoredDetails.push(
+      `+${restoreNow} ${product.retailUnit} ${product.name}${
+        txRow.batch ? ` (Lô ${txRow.batch.batchNumber})` : ""
+      }`
+    );
+  }
+
+  // Fallback nếu hóa đơn cũ không có dòng SALE_DEDUCT (dữ liệu seed cũ)
+  if (remainingToRestore > 0) {
+    await db.stockTransaction.create({
+      data: {
+        productId,
+        batchId: null,
+        type: "RETURN",
+        quantityChange: remainingToRestore,
+        referenceId: invoiceId,
+        note: `Hoàn kho trả hàng Shop HĐ ${invoiceCode} — Lý do: ${reason}`,
+        createdById: actorId,
+        createdByName: actorName,
+      },
+    });
+    restoredCount += remainingToRestore;
+    restoredDetails.push(`+${remainingToRestore} ${product.retailUnit} ${product.name}`);
+  }
+
+  if (restoredCount > 0) {
+    await db.product.update({
+      where: { id: productId },
+      data: { stockQuantity: { increment: restoredCount } },
+    });
   }
 
   return { restoredCount, restoredDetails };

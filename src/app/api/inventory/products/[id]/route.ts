@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -66,6 +67,9 @@ export async function PATCH(
       isActive: body.isActive !== undefined ? Boolean(body.isActive) : existing.isActive,
     },
   });
+
+  revalidatePath("/");
+  revalidatePath(`/san-pham/${updated.slug}`);
 
   return NextResponse.json({
     product: updated,

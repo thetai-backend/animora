@@ -314,6 +314,22 @@ export function ManagerCmsTab({
     }
   };
 
+  const handleToggleShopWeb = async (p: CmsShopProduct) => {
+    const res = await fetch(`/api/inventory/products/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isFeaturedOnWeb: !p.isFeaturedOnWeb }),
+    });
+    if (res.ok) {
+      notify(
+        p.isFeaturedOnWeb
+          ? `Đã ẩn "${p.name}" khỏi Thư viện Shop Trang chủ.`
+          : `Đã hiện "${p.name}" trên Thư viện Shop Trang chủ!`
+      );
+      await onReload();
+    }
+  };
+
   // 4) Doctors Profile CMS Edit
   const [editingDoc, setEditingDoc] = useState<StaffMember | null>(null);
   const [docForm, setDocForm] = useState({
@@ -465,6 +481,24 @@ export function ManagerCmsTab({
                 value={clinicForm.email}
                 onChange={(e) => setClinicForm({ ...clinicForm, email: e.target.value })}
                 className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-bold">Giờ mở cửa (VD: 07:00)</label>
+              <input
+                type="time"
+                value={clinicForm.openTime}
+                onChange={(e) => setClinicForm({ ...clinicForm, openTime: e.target.value })}
+                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm font-bold"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-bold">Giờ đóng cửa (VD: 20:00)</label>
+              <input
+                type="time"
+                value={clinicForm.closeTime}
+                onChange={(e) => setClinicForm({ ...clinicForm, closeTime: e.target.value })}
+                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3.5 py-2 text-sm font-bold"
               />
             </div>
             <div>
@@ -765,18 +799,48 @@ export function ManagerCmsTab({
                 <div className="flex-1 min-w-0 space-y-1">
                   <div className="flex items-start justify-between gap-2">
                     <h4 className="font-extrabold text-[#132A2E] line-clamp-2">{p.name}</h4>
-                    <button
-                      type="button"
-                      onClick={() => openEditShop(p)}
-                      className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-2.5 py-1 font-bold text-white"
-                    >
-                      <Edit3 className="h-3 w-3" />
-                      Sửa bài
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleShopWeb(p)}
+                        className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
+                          p.isFeaturedOnWeb
+                            ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                            : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                        }`}
+                      >
+                        {p.isFeaturedOnWeb ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                        {p.isFeaturedOnWeb ? "Đang hiện" : "Đang ẩn"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditShop(p)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#0F766E] px-2.5 py-1 font-bold text-white"
+                      >
+                        <Edit3 className="h-3 w-3" />
+                        Sửa bài
+                      </button>
+                    </div>
                   </div>
                   <p className="text-[#476268]">
-                    {p.brand} • <strong className="text-[#0F766E]">{formatVnd(p.price)}</strong> •{" "}
-                    {p.isFeaturedOnWeb ? "Đang hiện Trang chủ" : "Đang ẩn Trang chủ"}
+                    {p.brand} •{" "}
+                    {p.targetSpecies === "DOG"
+                      ? "Chó"
+                      : p.targetSpecies === "CAT"
+                      ? "Mèo"
+                      : "Chó & Mèo"}{" "}
+                    • <strong className="text-[#0F766E]">{formatVnd(p.price)}</strong> •{" "}
+                    <span
+                      className={
+                        p.stockQuantity > 0
+                          ? "font-bold text-emerald-700"
+                          : "font-bold text-rose-600"
+                      }
+                    >
+                      {p.stockQuantity > 0
+                        ? `Còn hàng tại quầy (${p.stockQuantity} ${p.retailUnit})`
+                        : `Tồn kho: ${p.stockQuantity}`}
+                    </span>
                   </p>
                   <p className="line-clamp-2 text-[11px] text-[#476268]">{p.shortDescription}</p>
                 </div>
@@ -826,6 +890,18 @@ export function ManagerCmsTab({
                   onChange={(e) => setShopForm({ ...shopForm, category: e.target.value })}
                   className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2"
                 />
+              </div>
+              <div>
+                <label className="mb-1 block font-bold">Loài phù hợp *</label>
+                <select
+                  value={shopForm.targetSpecies}
+                  onChange={(e) => setShopForm({ ...shopForm, targetSpecies: e.target.value })}
+                  className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 font-bold"
+                >
+                  <option value="BOTH">Cả Chó &amp; Mèo</option>
+                  <option value="DOG">Dành cho Chó</option>
+                  <option value="CAT">Dành cho Mèo</option>
+                </select>
               </div>
               <div>
                 <label className="mb-1 block font-bold">Giá bán tại quầy (VNĐ) *</label>

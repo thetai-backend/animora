@@ -24,14 +24,17 @@ interface ReminderRow {
   guestPetSpecies: string | null;
   daysUntil: number;
   isUrgent: boolean;
+  isThisWeek: boolean;
   isOverdue: boolean;
+  isOverdueUnreminded: boolean;
+  isReminded: boolean;
   customer: { id: string; fullName: string; phone: string | null; email: string } | null;
   pet: { id: string; name: string; species: string; breed: string | null; status: string } | null;
   doctor: { fullName: string };
   emailLogs: { id: string; createdAt: string; recipientEmail: string }[];
 }
 
-interface EmailLogItem {
+interface NotificationLogItem {
   id: string;
   recipientEmail: string;
   recipientName: string;
@@ -42,13 +45,16 @@ interface EmailLogItem {
   createdAt: string;
 }
 
+type ReminderFilter = "ALL" | "URGENT" | "THIS_WEEK" | "OVERDUE" | "REMINDED";
+
 export function ReceptionRemindersTab({
   notify,
 }: {
   notify: (msg: string, type?: "ok" | "err") => void;
 }) {
   const [reminders, setReminders] = useState<ReminderRow[]>([]);
-  const [emailLogs, setEmailLogs] = useState<EmailLogItem[]>([]);
+  const [emailLogs, setEmailLogs] = useState<NotificationLogItem[]>([]);
+  const [filter, setFilter] = useState<ReminderFilter>("ALL");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -59,7 +65,7 @@ export function ReceptionRemindersTab({
       if (res.ok) {
         const data = await res.json();
         setReminders(data.reminders || []);
-        setEmailLogs(data.emailLogs || []);
+        setEmailLogs(data.notificationLogs || data.emailLogs || []);
       }
     } finally {
       setLoading(false);
@@ -100,20 +106,36 @@ export function ReceptionRemindersTab({
     }
   };
 
+  const counts = {
+    ALL: reminders.length,
+    URGENT: reminders.filter((r) => r.isUrgent).length,
+    THIS_WEEK: reminders.filter((r) => r.isThisWeek).length,
+    OVERDUE: reminders.filter((r) => r.isOverdueUnreminded).length,
+    REMINDED: reminders.filter((r) => r.isReminded).length,
+  };
+
+  const filteredReminders = reminders.filter((r) => {
+    if (filter === "URGENT") return r.isUrgent;
+    if (filter === "THIS_WEEK") return r.isThisWeek;
+    if (filter === "OVERDUE") return r.isOverdueUnreminded;
+    if (filter === "REMINDED") return r.isReminded;
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Danh sách Cần nhắc hẹn tái khám / tiêm phòng */}
-      <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-extrabold text-[#132A2E]">
               <BellRing className="h-5 w-5 text-[#F97316]" />
-              Danh sách Cần nhắc hẹn Tái khám / Tiêm phòng ({reminders.length})
+              Danh sách Cần nhắc hẹn Tái khám / Tiêm phòng ({filteredReminders.length})
             </h2>
             <p className="text-xs text-[#476268]">
-              Tự tổng hợp từ bệnh án S.O.A.P có &quot;Ngày hẹn tái khám&quot; (ưu tiên sắp đến trong 1–2 ngày tới).{" "}
+              Tự tổng hợp toàn bộ bệnh án S.O.A.P có &quot;Ngày hẹn tái khám&quot;.{" "}
               <strong className="text-rose-700">
-                TUYỆT ĐỐI tự động loại bỏ toàn bộ thú cưng ở trạng thái Đã mất.
+                Quy tắc bảo vệ cảm xúc chủ nuôi: tự động loại bỏ 100% thú cưng ở trạng thái Đã mất.
               </strong>
             </p>
           </div>
@@ -127,8 +149,45 @@ export function ReceptionRemindersTab({
           </button>
         </div>
 
+        {/* Bộ lọc nhanh theo yêu cầu Giai đoạn 4 */}
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { key: "ALL", label: "Tất cả" },
+              { key: "URGENT", label: "Sắp đến hạn (1–2 ngày tới)" },
+              { key: "THIS_WEEK", label: "Trong tuần này" },
+              { key: "OVERDUE", label: "Quá hạn chưa nhắc" },
+              { key: "REMINDED", label: "Đã nhắc" },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition ${
+                filter === f.key
+                  ? f.key === "OVERDUE"
+                    ? "bg-rose-600 text-white"
+                    : f.key === "URGENT"
+                    ? "bg-[#F97316] text-white"
+                    : "bg-[#0F766E] text-white"
+                  : "border border-[#132A2E]/12 bg-[#FAF9F6] text-[#476268] hover:text-[#132A2E]"
+              }`}
+            >
+              <span>{f.label}</span>
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                  filter === f.key ? "bg-white/25 text-white" : "bg-white text-[#132A2E]"
+                }`}
+              >
+                {counts[f.key]}
+              </span>
+            </button>
+          ))}
+        </div>
+
         <div className="space-y-3">
-          {reminders.map((r) => {
+          {filteredReminders.map((r) => {
             const petName = r.pet?.name || r.guestPetName || "Thú cưng";
             const ownerName = r.customer?.fullName || r.guestOwnerName || "Khách vãng lai";
             const ownerPhone = r.customer?.phone || r.guestOwnerPhone || "—";
@@ -150,7 +209,7 @@ export function ReceptionRemindersTab({
                     <span className="font-mono font-extrabold text-[#0F766E]">{r.recordCode}</span>
                     {r.isUrgent && (
                       <span className="rounded-full bg-[#F97316] px-2.5 py-0.5 text-[10px] font-extrabold text-white">
-                        ƯU TIÊN — CÒN {r.daysUntil === 0 ? "HÔM NAY" : `${r.daysUntil} NGÀY`}
+                        SẮP ĐẾN HẠN — {r.daysUntil === 0 ? "HÔM NAY" : `CÒN ${r.daysUntil} NGÀY`}
                       </span>
                     )}
                     {r.isOverdue && (
@@ -170,7 +229,7 @@ export function ReceptionRemindersTab({
                   </p>
                   <p className="text-[#476268]">
                     SĐT: <strong>{ownerPhone}</strong> • Email:{" "}
-                    <strong>{ownerEmail || "Không có email (Vãng lai)"}</strong> • BS: {r.doctor.fullName}
+                    <strong>{ownerEmail || "Không có email (Khách vãng lai)"}</strong> • BS: {r.doctor.fullName}
                   </p>
                   <p className="text-[#132A2E]">
                     Dặn dò: <em>{r.followUpNote || "Tái khám / Tiêm nhắc định kỳ"}</em>
@@ -204,7 +263,7 @@ export function ReceptionRemindersTab({
                     }`}
                   >
                     <PhoneCall className="h-3.5 w-3.5" />
-                    {r.reminderCalledAt ? "Gọi nhắc lại" : "Đã gọi nhắc"}
+                    {r.reminderCalledAt ? "Gọi nhắc lại" : "Đánh dấu đã gọi nhắc"}
                   </button>
 
                   <button
@@ -214,26 +273,26 @@ export function ReceptionRemindersTab({
                     className="inline-flex items-center gap-1.5 rounded-xl bg-[#F97316] px-4 py-2.5 font-extrabold text-white transition hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     <Mail className="h-3.5 w-3.5" />
-                    Gửi Email nhắc hẹn
+                    Gửi Email nhắc lịch
                   </button>
                 </div>
               </div>
             );
           })}
 
-          {!loading && reminders.length === 0 && (
+          {!loading && filteredReminders.length === 0 && (
             <p className="py-8 text-center text-sm text-[#476268]">
-              Hiện chưa có lịch hẹn tái khám / tiêm phòng nào cần nhắc.
+              Không có lịch hẹn nào trong nhóm lọc này.
             </p>
           )}
         </div>
       </div>
 
-      {/* Nhật ký Email nhắc hẹn đã gửi (EmailLog) */}
+      {/* Nhật ký Email nhắc hẹn đã gửi (NotificationLog) */}
       <div className="rounded-3xl border border-[#0F766E]/15 bg-white p-7 shadow-sm">
         <h3 className="flex items-center gap-2 text-base font-extrabold text-[#132A2E]">
           <Mail className="h-5 w-5 text-[#0F766E]" />
-          Nhật ký Email nhắc hẹn đã gửi ({emailLogs.length})
+          Nhật ký Email nhắc lịch đã gửi — NotificationLog ({emailLogs.length})
         </h3>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -242,7 +301,7 @@ export function ReceptionRemindersTab({
                 <th className="py-2.5">Thời gian gửi</th>
                 <th className="py-2.5">Người nhận</th>
                 <th className="py-2.5">Thú cưng</th>
-                <th className="py-2.5">Tiêu đề Email</th>
+                <th className="py-2.5">Tiêu đề &amp; Nội dung Email</th>
                 <th className="py-2.5">Nhân viên gửi</th>
               </tr>
             </thead>
@@ -265,7 +324,7 @@ export function ReceptionRemindersTab({
               {emailLogs.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-6 text-center text-[#476268]">
-                    Chưa có Email nhắc hẹn nào được gửi. Bấm &quot;Gửi Email nhắc hẹn&quot; phía trên để thử ngay.
+                    Chưa có Email nhắc lịch nào được gửi. Bấm &quot;Gửi Email nhắc lịch&quot; phía trên để gửi ngay.
                   </td>
                 </tr>
               )}

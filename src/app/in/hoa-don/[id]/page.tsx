@@ -55,12 +55,21 @@ export default async function PrintInvoiceA4Page({
 
   const customerName = invoice.customer?.fullName || invoice.guestName || "Khách vãng lai";
   const customerPhone = invoice.customer?.phone || invoice.guestPhone || "—";
+  const isGuest = !invoice.customer;
+  const netPaid =
+    invoice.status === "CANCELLED"
+      ? 0
+      : Math.max(0, invoice.totalAmount - (invoice.refundedAmount || 0));
 
   return (
     <div className="min-h-screen bg-[#E9ECEF] pb-16 text-[#132A2E] print:bg-white print:pb-0">
       <PrintTriggerBar
         title={`Xem trước bản in A4 — Hóa đơn ${invoice.invoiceCode}`}
-        backHref="/le-tan"
+        backHref={session.role === "MANAGER" ? "/quan-ly" : "/le-tan"}
+        secondaryHref={
+          invoice.medicalRecord ? `/in/phieu-kham/${invoice.medicalRecord.id}` : undefined
+        }
+        secondaryLabel={invoice.medicalRecord ? "Mở Phiếu khám & Đơn thuốc A4" : undefined}
       />
 
       <div className="print-a4-sheet mx-auto mt-8 w-[210mm] min-h-[297mm] rounded-xl border border-slate-200 bg-white p-[14mm] shadow-2xl print:mt-0 print:min-h-0 print:rounded-none">
@@ -104,11 +113,16 @@ export default async function PrintInvoiceA4Page({
               {invoice.invoiceCode}
             </p>
             <p className="mt-0.5 text-[11px] text-[#476268]">
-              Ngày lập: {formatDateTimeVn(invoice.paidAt || invoice.createdAt)}
+              Ngày thanh toán: {formatDateTimeVn(invoice.paidAt || invoice.createdAt)}
             </p>
             {invoice.status === "CANCELLED" && (
               <span className="mt-1 inline-block rounded bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
                 ĐÃ HỦY HÓA ĐƠN
+              </span>
+            )}
+            {invoice.status === "PARTIALLY_RETURNED" && (
+              <span className="mt-1 inline-block rounded bg-amber-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                ĐÃ HOÀN TRẢ HÀNG SHOP
               </span>
             )}
           </div>
@@ -127,7 +141,12 @@ export default async function PrintInvoiceA4Page({
           <div className="space-y-1">
             <p>
               <span className="text-[#476268]">Khách hàng:</span>{" "}
-              <strong className="text-[#132A2E]">{customerName}</strong>
+              <strong className="text-[#132A2E]">{customerName}</strong>{" "}
+              {isGuest && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                  Vãng lai
+                </span>
+              )}
             </p>
             <p>
               <span className="text-[#476268]">Số điện thoại:</span>{" "}
@@ -144,7 +163,7 @@ export default async function PrintInvoiceA4Page({
               <strong>{invoice.doctor?.fullName || "Bán lẻ tại quầy"}</strong>
             </p>
             <p>
-              <span className="text-[#476268]">Thu ngân lập phiếu:</span>{" "}
+              <span className="text-[#476268]">Lễ tân thu ngân:</span>{" "}
               <strong>{invoice.cashier?.fullName || "Quầy Lễ tân ANIMORA"}</strong>
             </p>
             <p>
@@ -159,7 +178,9 @@ export default async function PrintInvoiceA4Page({
           <thead>
             <tr className="border-y-2 border-[#0F766E] bg-[#0F766E]/8 text-[#0F766E]">
               <th className="px-3 py-2.5 text-left font-extrabold">STT</th>
-              <th className="px-3 py-2.5 text-left font-extrabold">Hạng mục Dịch vụ / Thuốc / Sản phẩm</th>
+              <th className="px-3 py-2.5 text-left font-extrabold">
+                Hạng mục Dịch vụ / Thuốc / Sản phẩm Shop
+              </th>
               <th className="px-3 py-2.5 text-center font-extrabold">Phân loại</th>
               <th className="px-3 py-2.5 text-center font-extrabold">ĐVT</th>
               <th className="px-3 py-2.5 text-center font-extrabold">SL</th>
@@ -176,6 +197,11 @@ export default async function PrintInvoiceA4Page({
                   {item.dosageInstruction && (
                     <p className="text-[10px] italic text-[#476268]">
                       HDSD: {item.dosageInstruction}
+                    </p>
+                  )}
+                  {item.returnedQuantity > 0 && (
+                    <p className="text-[10px] font-bold text-amber-700">
+                      Đã hoàn trả Shop: {item.returnedQuantity} {item.unit}
                     </p>
                   )}
                 </td>
@@ -229,6 +255,8 @@ export default async function PrintInvoiceA4Page({
                 className={
                   invoice.status === "PAID"
                     ? "text-emerald-700"
+                    : invoice.status === "PARTIALLY_RETURNED"
+                    ? "text-amber-700"
                     : invoice.status === "CANCELLED"
                     ? "text-rose-700"
                     : "text-amber-700"
@@ -236,11 +264,16 @@ export default async function PrintInvoiceA4Page({
               >
                 {invoice.status === "PAID"
                   ? "ĐÃ THANH TOÁN ĐỦ"
+                  : invoice.status === "PARTIALLY_RETURNED"
+                  ? "ĐÃ HOÀN TRẢ MỘT PHẦN HÀNG SHOP"
                   : invoice.status === "CANCELLED"
                   ? `ĐÃ HỦY (${invoice.cancelReason || ""})`
                   : "CHỜ THANH TOÁN"}
               </strong>
             </p>
+            {invoice.status === "PARTIALLY_RETURNED" && invoice.cancelReason && (
+              <p className="text-[11px] text-amber-800">Ghi chú: {invoice.cancelReason}</p>
+            )}
           </div>
 
           <div className="w-80 space-y-2 rounded-2xl border border-[#0F766E]/20 bg-[#FAF9F6] p-4 text-xs">
@@ -250,13 +283,13 @@ export default async function PrintInvoiceA4Page({
             </div>
             {invoice.eventDiscountAmount > 0 && (
               <div className="flex justify-between text-emerald-700">
-                <span>Ưu đãi sự kiện ({invoice.appliedEventPromoTitle || "Sự kiện"}):</span>
+                <span>Giảm theo sự kiện/DV ({invoice.appliedEventPromoTitle || "Sự kiện"}):</span>
                 <span className="font-bold">-{formatVnd(invoice.eventDiscountAmount)}</span>
               </div>
             )}
             {invoice.couponDiscountAmount > 0 && (
               <div className="flex justify-between text-emerald-700">
-                <span>Mã ưu đãi ({invoice.appliedCouponCode}):</span>
+                <span>Giảm theo mã ưu đãi ({invoice.appliedCouponCode}):</span>
                 <span className="font-bold">-{formatVnd(invoice.couponDiscountAmount)}</span>
               </div>
             )}
@@ -264,6 +297,18 @@ export default async function PrintInvoiceA4Page({
               <span>TỔNG THANH TOÁN:</span>
               <span>{formatVnd(invoice.totalAmount)}</span>
             </div>
+            {invoice.refundedAmount > 0 && (
+              <>
+                <div className="flex justify-between text-rose-700">
+                  <span>Đã hoàn tiền (Hủy/Trả hàng):</span>
+                  <span className="font-bold">-{formatVnd(invoice.refundedAmount)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-extrabold text-[#132A2E]">
+                  <span>THỰC THU CÒN LẠI:</span>
+                  <span>{formatVnd(netPaid)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

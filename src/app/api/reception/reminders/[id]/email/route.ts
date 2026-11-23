@@ -39,7 +39,10 @@ export async function POST(
   const recipientEmail = record.customer?.email || record.booking?.guestEmail || null;
   if (!recipientEmail) {
     return NextResponse.json(
-      { error: "Khách hàng này không có địa chỉ Email (khách vãng lai chưa nhập email). Vui lòng gọi điện trực tiếp." },
+      {
+        error:
+          "Khách hàng này không có địa chỉ Email (khách vãng lai chưa nhập email). Vui lòng gọi điện trực tiếp.",
+      },
       { status: 400 }
     );
   }
@@ -60,7 +63,8 @@ export async function POST(
     body,
   });
 
-  const emailLog = await prisma.emailLog.create({
+  // Lưu vào bảng NotificationLog (chuẩn Giai đoạn 4) để Lễ tân & Quản lý đối soát
+  const notificationLog = await prisma.notificationLog.create({
     data: {
       medicalRecordId: record.id,
       recipientEmail,
@@ -69,13 +73,15 @@ export async function POST(
       subject,
       body,
       channel: "EMAIL",
+      status: "SENT",
       sentById: session.userId,
       sentByName: session.fullName,
     },
   });
 
   return NextResponse.json({
-    emailLog,
-    message: `Đã gửi Email nhắc hẹn tới ${recipientEmail} và lưu vào Nhật ký Email đã gửi!`,
+    notificationLog,
+    emailLog: notificationLog,
+    message: `Đã gửi Email nhắc hẹn tới ${recipientEmail} và lưu vào Nhật ký NotificationLog!`,
   });
 }

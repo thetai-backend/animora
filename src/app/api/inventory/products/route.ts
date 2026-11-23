@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { slugifyVi } from "@/lib/format";
@@ -79,6 +80,9 @@ export async function POST(request: NextRequest) {
       isActive: true,
     },
   });
+
+  revalidatePath("/");
+  revalidatePath(`/san-pham/${product.slug}`);
 
   return NextResponse.json(
     {

@@ -68,7 +68,9 @@ export default async function PrintMedicalRecordA4Page({
     <div className="min-h-screen bg-[#E9ECEF] pb-16 text-[#132A2E] print:bg-white print:pb-0">
       <PrintTriggerBar
         title={`Xem trước bản in A4 — Phiếu khám & Đơn thuốc ${record.recordCode}`}
-        backHref="/le-tan"
+        backHref={session.role === "DOCTOR" ? "/bac-si" : session.role === "MANAGER" ? "/quan-ly" : "/le-tan"}
+        secondaryHref={record.invoice ? `/in/hoa-don/${record.invoice.id}` : undefined}
+        secondaryLabel={record.invoice ? `Mở Hóa đơn ${record.invoice.invoiceCode} A4` : undefined}
       />
 
       <div className="print-a4-sheet mx-auto mt-8 w-[210mm] min-h-[297mm] rounded-xl border border-slate-200 bg-white p-[14mm] shadow-2xl print:mt-0 print:min-h-0 print:rounded-none">
@@ -149,7 +151,13 @@ export default async function PrintMedicalRecordA4Page({
           </div>
           <div className="space-y-1">
             <p>
-              <span className="text-[#476268]">Chủ nuôi:</span> <strong>{ownerName}</strong>
+              <span className="text-[#476268]">Chủ nuôi:</span>{" "}
+              <strong>{ownerName}</strong>{" "}
+              {!record.customer && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                  Khách vãng lai (Thông tin tạm)
+                </span>
+              )}
             </p>
             <p>
               <span className="text-[#476268]">Số điện thoại:</span> <strong>{ownerPhone}</strong>

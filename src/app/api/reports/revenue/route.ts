@@ -2,26 +2,58 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-function getRangeForPeriod(period: string, dateStr: string): {
-  start: Date;
-  end: Date;
-  label: string;
-} {
+function parseYmd(dateStr: string): Date {
   const parts = dateStr.split("-").map(Number);
-  const year = parts[0] || new Date().getFullYear();
-  const month = (parts[1] || new Date().getMonth() + 1) - 1;
-  const day = parts[2] || new Date().getDate();
+  const now = new Date();
+  const year = parts[0] || now.getFullYear();
+  const month = (parts[1] || now.getMonth() + 1) - 1;
+  const day = parts[2] || now.getDate();
+  return new Date(year, month, day);
+}
 
-  if (period === "WEEK") {
-    const ref = new Date(year, month, day);
-    const dow = ref.getDay(); // 0=CN..6=T7
-    const diffToMon = dow === 0 ? -6 : 1 - dow;
-    const start = new Date(year, month, day + diffToMon, 0, 0, 0, 0);
-    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 23, 59, 59, 999);
+function formatYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function getRangeForPeriod(
+  period: string,
+  dateStr: string,
+  customStart?: string | null,
+  customEnd?: string | null
+): { start: Date; end: Date; label: string } {
+  const ref = parseYmd(dateStr);
+  const year = ref.getFullYear();
+  const month = ref.getMonth();
+  const day = ref.getDate();
+
+  if (period === "CUSTOM" && customStart && customEnd) {
+    const s = parseYmd(customStart);
+    const e = parseYmd(customEnd);
+    const start = new Date(
+      Math.min(s.getTime(), e.getTime())
+    );
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(
+      Math.max(s.getTime(), e.getTime())
+    );
+    end.setHours(23, 59, 59, 999);
     return {
       start,
       end,
-      label: `Tuần (${start.toLocaleDateString("vi-VN")} – ${end.toLocaleDateString("vi-VN")})`,
+      label: `Từ ${start.toLocaleDateString("vi-VN")} đến ${end.toLocaleDateString("vi-VN")}`,
+    };
+  }
+
+  if (period === "WEEK") {
+    // 7 ngày gần nhất tính đến ngày chọn (bao gồm ngày chọn)
+    const end = new Date(year, month, day, 23, 59, 59, 999);
+    const start = new Date(year, month, day - 6, 0, 0, 0, 0);
+    return {
+      start,
+      end,
+      label: `7 ngày qua (${start.toLocaleDateString("vi-VN")} – ${end.toLocaleDateString("vi-VN")})`,
     };
   }
 
@@ -51,6 +83,54 @@ function getRangeForPeriod(period: string, dateStr: string): {
   };
 }
 
+/**
+ * Tách doanh thu thực nhận của 1 hóa đơn (đã trừ khuyến mãi & đã trừ refundedAmount) thành 3 mảng:
+ * 1) Dịch vụ Y tế (MEDICAL)
+ * 2) Dịch vụ Spa / Grooming (SPA)
+ * 3) Bán lẻ Shop & Thuốc kê đơn (SHOP + MEDICINE)
+ */
+function splitInvoiceNetRevenue(inv: {
+  totalAmount: number;
+  refundedAmount: number;
+  items: { category: string; quantity: number; returnedQuantity: number; unitPrice: number; totalPrice: number }[];
+}) {
+  const netAmount = Math.max(0, inv.totalAmount - inv.refundedAmount);
+  if (netAmount <= 0) {
+    return { netAmount: 0, medical: 0, spa: 0, shop: 0, shopOnly: 0, medicineOnly: 0 };
+  }
+
+  let grossMed = 0;
+  let grossSpa = 0;
+  let grossShopOnly = 0;
+  let grossMedOnly = 0;
+
+  for (const it of inv.items) {
+    const activeQty = Math.max(0, it.quantity - (it.returnedQuantity || 0));
+    const activeGross = activeQty * it.unitPrice;
+    if (it.category === "MEDICAL") grossMed += activeGross;
+    else if (it.category === "SPA") grossSpa += activeGross;
+    else if (it.category === "MEDICINE") grossMedOnly += activeGross;
+    else grossShopOnly += activeGross;
+  }
+
+  const grossShopAndMed = grossShopOnly + grossMedOnly;
+  const grossTotal = grossMed + grossSpa + grossShopAndMed;
+
+  if (grossTotal <= 0) {
+    return { netAmount, medical: netAmount, spa: 0, shop: 0, shopOnly: 0, medicineOnly: 0 };
+  }
+
+  const ratio = netAmount / grossTotal;
+  const medical = Math.round(grossMed * ratio);
+  const spa = Math.round(grossSpa * ratio);
+  const shop = Math.max(0, netAmount - medical - spa);
+  const shopOnly =
+    grossShopAndMed > 0 ? Math.round((grossShopOnly / grossShopAndMed) * shop) : 0;
+  const medicineOnly = Math.max(0, shop - shopOnly);
+
+  return { netAmount, medical, spa, shop, shopOnly, medicineOnly };
+}
+
 export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session || !["MANAGER", "RECEPTIONIST"].includes(session.role)) {
@@ -58,25 +138,34 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const period = ["DAY", "WEEK", "MONTH", "YEAR"].includes(String(searchParams.get("period")))
-    ? String(searchParams.get("period"))
+  const rawPeriod = String(searchParams.get("period") || "MONTH");
+  const period = ["DAY", "WEEK", "MONTH", "YEAR", "CUSTOM"].includes(rawPeriod)
+    ? rawPeriod
     : "MONTH";
-  const now = new Date();
-  const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate()
-  ).padStart(2, "0")}`;
-  const dateStr = searchParams.get("date") || defaultDate;
 
-  const { start, end, label } = getRangeForPeriod(period, dateStr);
+  const todayStr = formatYmd(new Date());
+  const dateStr = searchParams.get("date") || todayStr;
+  const customStart = searchParams.get("startDate");
+  const customEnd = searchParams.get("endDate");
+  const shiftDateStr = searchParams.get("shiftDate") || dateStr;
 
-  // Chốt ca cuối ngày luôn tính riêng cho đúng ngày dateStr được chọn
-  const dayRange = getRangeForPeriod("DAY", dateStr);
+  const { start, end, label } = getRangeForPeriod(period, dateStr, customStart, customEnd);
+  const dayRange = getRangeForPeriod("DAY", shiftDateStr);
 
-  const [periodInvoices, dayInvoices, periodRecords, doctors] = await Promise.all([
+  const [
+    periodAllInvoices,
+    dayAllInvoices,
+    periodRecords,
+    newCustomersCount,
+    doctors,
+  ] = await Promise.all([
     prisma.invoice.findMany({
       where: {
-        status: "PAID",
-        paidAt: { gte: start, lte: end },
+        status: { in: ["PAID", "PARTIALLY_RETURNED", "CANCELLED"] },
+        OR: [
+          { paidAt: { gte: start, lte: end } },
+          { paidAt: null, cancelledAt: { gte: start, lte: end } },
+        ],
       },
       include: {
         items: true,
@@ -89,8 +178,11 @@ export async function GET(request: NextRequest) {
     }),
     prisma.invoice.findMany({
       where: {
-        status: "PAID",
-        paidAt: { gte: dayRange.start, lte: dayRange.end },
+        status: { in: ["PAID", "PARTIALLY_RETURNED", "CANCELLED"] },
+        OR: [
+          { paidAt: { gte: dayRange.start, lte: dayRange.end } },
+          { paidAt: null, cancelledAt: { gte: dayRange.start, lte: dayRange.end } },
+        ],
       },
       include: {
         doctor: { select: { id: true, fullName: true } },
@@ -105,7 +197,13 @@ export async function GET(request: NextRequest) {
       where: {
         createdAt: { gte: start, lte: end },
       },
-      select: { id: true, doctorId: true },
+      select: { id: true, doctorId: true, status: true },
+    }),
+    prisma.user.count({
+      where: {
+        role: "CUSTOMER",
+        createdAt: { gte: start, lte: end },
+      },
     }),
     prisma.user.findMany({
       where: { role: "DOCTOR" },
@@ -114,90 +212,136 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
-  // 1) Tổng doanh thu & phân bổ 3 mảng (Y tế / Spa / Bán lẻ Shop) theo tỷ lệ thực thu
+  const activePeriodInvoices = periodAllInvoices.filter(
+    (inv) => inv.status === "PAID" || inv.status === "PARTIALLY_RETURNED"
+  );
+  const cancelledPeriodInvoices = periodAllInvoices.filter(
+    (inv) => inv.status === "CANCELLED"
+  );
+
+  // 1) Tổng doanh thu thực nhận & tách 3 mảng (Y tế / Spa / Bán lẻ Shop & Thuốc)
   let totalRevenue = 0;
   let totalDiscount = 0;
+  let totalRefunded = 0;
   let medicalRevenue = 0;
   let spaRevenue = 0;
   let shopRevenue = 0;
+  let shopOnlyRevenue = 0;
+  let medicineRevenue = 0;
   let totalCash = 0;
   let totalVietQr = 0;
   let cashCount = 0;
   let vietQrCount = 0;
 
-  for (const inv of periodInvoices) {
-    totalRevenue += inv.totalAmount;
+  for (const inv of activePeriodInvoices) {
+    const split = splitInvoiceNetRevenue(inv);
+    totalRevenue += split.netAmount;
     totalDiscount += inv.eventDiscountAmount + inv.couponDiscountAmount;
+    totalRefunded += inv.refundedAmount;
+
+    medicalRevenue += split.medical;
+    spaRevenue += split.spa;
+    shopRevenue += split.shop;
+    shopOnlyRevenue += split.shopOnly;
+    medicineRevenue += split.medicineOnly;
 
     if (inv.paymentMethod === "VIETQR") {
-      totalVietQr += inv.totalAmount;
+      totalVietQr += split.netAmount;
       vietQrCount += 1;
     } else {
-      totalCash += inv.totalAmount;
+      totalCash += split.netAmount;
       cashCount += 1;
-    }
-
-    const grossMed = inv.items
-      .filter((i) => i.category === "MEDICAL" || i.category === "MEDICINE")
-      .reduce((s, i) => s + i.totalPrice, 0);
-    const grossSpa = inv.items
-      .filter((i) => i.category === "SPA")
-      .reduce((s, i) => s + i.totalPrice, 0);
-    const grossShop = inv.items
-      .filter((i) => i.category === "SHOP")
-      .reduce((s, i) => s + i.totalPrice, 0);
-    const grossTotal = grossMed + grossSpa + grossShop;
-
-    if (grossTotal > 0) {
-      const ratio = inv.totalAmount / grossTotal;
-      const netMed = Math.round(grossMed * ratio);
-      const netSpa = Math.round(grossSpa * ratio);
-      const netShop = Math.max(0, inv.totalAmount - netMed - netSpa);
-      medicalRevenue += netMed;
-      spaRevenue += netSpa;
-      shopRevenue += netShop;
-    } else {
-      medicalRevenue += inv.totalAmount;
     }
   }
 
-  // 2) Chuỗi biểu đồ xu hướng theo bộ lọc Ngày / Tuần / Tháng / Năm
-  const trendMap = new Map<string, { label: string; total: number; medical: number; spa: number; shop: number }>();
+  const cancelledAmount = cancelledPeriodInvoices.reduce((s, i) => s + i.totalAmount, 0);
+  const completedExamsCount = periodRecords.filter(
+    (r) => r.status === "LOCKED" || r.status === "SENT_TO_POS"
+  ).length;
+
+  // 2) Chuỗi biểu đồ xu hướng theo bộ lọc thời gian
+  const trendMap = new Map<
+    string,
+    { label: string; total: number; medical: number; spa: number; shop: number }
+  >();
 
   if (period === "DAY") {
     for (let h = 7; h <= 20; h++) {
       const key = `${String(h).padStart(2, "0")}:00`;
       trendMap.set(key, { label: key, total: 0, medical: 0, spa: 0, shop: 0 });
     }
-    for (const inv of periodInvoices) {
+    for (const inv of activePeriodInvoices) {
       const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
       const h = Math.min(20, Math.max(7, d.getHours()));
       const key = `${String(h).padStart(2, "0")}:00`;
-      const bucket = trendMap.get(key)!;
-      bucket.total += inv.totalAmount;
-    }
-  } else if (period === "WEEK") {
-    const dayNames = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-        d.getDate()
-      ).padStart(2, "0")}`;
-      trendMap.set(key, {
-        label: `${dayNames[i]} (${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")})`,
-        total: 0,
-        medical: 0,
-        spa: 0,
-        shop: 0,
-      });
-    }
-    for (const inv of periodInvoices) {
-      const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-        d.getDate()
-      ).padStart(2, "0")}`;
       const bucket = trendMap.get(key);
-      if (bucket) bucket.total += inv.totalAmount;
+      if (bucket) {
+        const split = splitInvoiceNetRevenue(inv);
+        bucket.total += split.netAmount;
+        bucket.medical += split.medical;
+        bucket.spa += split.spa;
+        bucket.shop += split.shop;
+      }
+    }
+  } else if (period === "WEEK" || period === "CUSTOM") {
+    const daySpan = Math.min(
+      62,
+      Math.max(1, Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1)
+    );
+    if (daySpan <= 35) {
+      const dowNames = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+      for (let i = 0; i < daySpan; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+        const key = formatYmd(d);
+        const shortDate = `${String(d.getDate()).padStart(2, "0")}/${String(
+          d.getMonth() + 1
+        ).padStart(2, "0")}`;
+        trendMap.set(key, {
+          label: period === "WEEK" ? `${dowNames[d.getDay()]} ${shortDate}` : shortDate,
+          total: 0,
+          medical: 0,
+          spa: 0,
+          shop: 0,
+        });
+      }
+      for (const inv of activePeriodInvoices) {
+        const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
+        const key = formatYmd(d);
+        const bucket = trendMap.get(key);
+        if (bucket) {
+          const split = splitInvoiceNetRevenue(inv);
+          bucket.total += split.netAmount;
+          bucket.medical += split.medical;
+          bucket.spa += split.spa;
+          bucket.shop += split.shop;
+        }
+      }
+    } else {
+      // Khoảng tùy chỉnh dài (> 35 ngày) -> gom theo Tháng
+      const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (cur <= end) {
+        const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`;
+        trendMap.set(key, {
+          label: `T${cur.getMonth() + 1}/${String(cur.getFullYear()).slice(-2)}`,
+          total: 0,
+          medical: 0,
+          spa: 0,
+          shop: 0,
+        });
+        cur.setMonth(cur.getMonth() + 1);
+      }
+      for (const inv of activePeriodInvoices) {
+        const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const bucket = trendMap.get(key);
+        if (bucket) {
+          const split = splitInvoiceNetRevenue(inv);
+          bucket.total += split.netAmount;
+          bucket.medical += split.medical;
+          bucket.spa += split.spa;
+          bucket.shop += split.shop;
+        }
+      }
     }
   } else if (period === "MONTH") {
     const daysInMonth = end.getDate();
@@ -205,30 +349,45 @@ export async function GET(request: NextRequest) {
       const key = String(dayNum).padStart(2, "0");
       trendMap.set(key, { label: `${dayNum}`, total: 0, medical: 0, spa: 0, shop: 0 });
     }
-    for (const inv of periodInvoices) {
+    for (const inv of activePeriodInvoices) {
       const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
       const key = String(d.getDate()).padStart(2, "0");
       const bucket = trendMap.get(key);
-      if (bucket) bucket.total += inv.totalAmount;
+      if (bucket) {
+        const split = splitInvoiceNetRevenue(inv);
+        bucket.total += split.netAmount;
+        bucket.medical += split.medical;
+        bucket.spa += split.spa;
+        bucket.shop += split.shop;
+      }
     }
   } else {
     for (let m = 1; m <= 12; m++) {
       const key = String(m).padStart(2, "0");
       trendMap.set(key, { label: `T${m}`, total: 0, medical: 0, spa: 0, shop: 0 });
     }
-    for (const inv of periodInvoices) {
+    for (const inv of activePeriodInvoices) {
       const d = inv.paidAt ? new Date(inv.paidAt) : new Date(inv.createdAt);
       const key = String(d.getMonth() + 1).padStart(2, "0");
       const bucket = trendMap.get(key);
-      if (bucket) bucket.total += inv.totalAmount;
+      if (bucket) {
+        const split = splitInvoiceNetRevenue(inv);
+        bucket.total += split.netAmount;
+        bucket.medical += split.medical;
+        bucket.spa += split.spa;
+        bucket.shop += split.shop;
+      }
     }
   }
 
-  // 3) Thống kê theo từng Bác sĩ
+  // 3) Hiệu suất theo từng Bác sĩ (đã trừ hoàn trả & loại hóa đơn hủy)
   const doctorStats = doctors.map((doc) => {
     const docRecords = periodRecords.filter((r) => r.doctorId === doc.id);
-    const docInvoices = periodInvoices.filter((inv) => inv.doctorId === doc.id);
-    const revenue = docInvoices.reduce((s, i) => s + i.totalAmount, 0);
+    const docInvoices = activePeriodInvoices.filter((inv) => inv.doctorId === doc.id);
+    const revenue = docInvoices.reduce(
+      (s, i) => s + Math.max(0, i.totalAmount - i.refundedAmount),
+      0
+    );
     return {
       doctorId: doc.id,
       doctorName: doc.fullName,
@@ -240,18 +399,28 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  // 4) Bảng đối soát chốt ca cuối ngày (cho ngày dateStr)
+  // 4) Bảng đối soát chốt ca cuối ngày (cho đúng ngày shiftDateStr)
   let shiftCashTotal = 0;
   let shiftVietQrTotal = 0;
   let shiftCashCount = 0;
   let shiftVietQrCount = 0;
+  let shiftCancelledCount = 0;
+  let shiftCancelledTotal = 0;
+  let shiftRefundedTotal = 0;
 
-  for (const inv of dayInvoices) {
+  for (const inv of dayAllInvoices) {
+    if (inv.status === "CANCELLED") {
+      shiftCancelledCount += 1;
+      shiftCancelledTotal += inv.totalAmount;
+      continue;
+    }
+    const netAmount = Math.max(0, inv.totalAmount - inv.refundedAmount);
+    shiftRefundedTotal += inv.refundedAmount;
     if (inv.paymentMethod === "VIETQR") {
-      shiftVietQrTotal += inv.totalAmount;
+      shiftVietQrTotal += netAmount;
       shiftVietQrCount += 1;
     } else {
-      shiftCashTotal += inv.totalAmount;
+      shiftCashTotal += netAmount;
       shiftCashCount += 1;
     }
   }
@@ -259,14 +428,24 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     period,
     date: dateStr,
+    startDate: formatYmd(start),
+    endDate: formatYmd(end),
     periodLabel: label,
     summary: {
       totalRevenue,
       totalDiscount,
-      invoiceCount: periodInvoices.length,
+      totalRefunded,
+      cancelledCount: cancelledPeriodInvoices.length,
+      cancelledAmount,
+      invoiceCount: activePeriodInvoices.length,
+      completedExamsCount,
+      totalExamsCount: periodRecords.length,
+      newCustomersCount,
       medicalRevenue,
       spaRevenue,
       shopRevenue,
+      shopOnlyRevenue,
+      medicineRevenue,
       totalCash,
       totalVietQr,
       cashCount,
@@ -275,28 +454,39 @@ export async function GET(request: NextRequest) {
     trendSeries: Array.from(trendMap.values()),
     doctorStats,
     shiftReconciliation: {
-      date: dateStr,
+      date: shiftDateStr,
       cashTotal: shiftCashTotal,
       vietQrTotal: shiftVietQrTotal,
       grandTotal: shiftCashTotal + shiftVietQrTotal,
       cashCount: shiftCashCount,
       vietQrCount: shiftVietQrCount,
-      invoices: dayInvoices.map((inv) => ({
-        id: inv.id,
-        invoiceCode: inv.invoiceCode,
-        type: inv.type,
-        paidAt: inv.paidAt,
-        customerName: inv.customer?.fullName || inv.guestName || "Khách lẻ",
-        customerPhone: inv.customer?.phone || inv.guestPhone || "—",
-        petSummary: inv.petSummary,
-        doctorName: inv.doctor?.fullName || null,
-        cashierName: inv.cashier?.fullName || "—",
-        paymentMethod: inv.paymentMethod,
-        subtotal: inv.subtotal,
-        discountTotal: inv.eventDiscountAmount + inv.couponDiscountAmount,
-        totalAmount: inv.totalAmount,
-        medicalRecordId: inv.medicalRecord?.id || null,
-      })),
+      cancelledCount: shiftCancelledCount,
+      cancelledTotal: shiftCancelledTotal,
+      refundedTotal: shiftRefundedTotal,
+      invoices: dayAllInvoices.map((inv) => {
+        const netAmount =
+          inv.status === "CANCELLED" ? 0 : Math.max(0, inv.totalAmount - inv.refundedAmount);
+        return {
+          id: inv.id,
+          invoiceCode: inv.invoiceCode,
+          type: inv.type,
+          status: inv.status,
+          paidAt: inv.paidAt || inv.cancelledAt || inv.createdAt,
+          customerName: inv.customer?.fullName || inv.guestName || "Khách lẻ",
+          customerPhone: inv.customer?.phone || inv.guestPhone || "—",
+          petSummary: inv.petSummary,
+          doctorName: inv.doctor?.fullName || null,
+          cashierName: inv.cashier?.fullName || "—",
+          paymentMethod: inv.paymentMethod,
+          subtotal: inv.subtotal,
+          discountTotal: inv.eventDiscountAmount + inv.couponDiscountAmount,
+          totalAmount: inv.totalAmount,
+          refundedAmount: inv.refundedAmount,
+          netAmount,
+          cancelReason: inv.cancelReason,
+          medicalRecordId: inv.medicalRecord?.id || null,
+        };
+      }),
     },
   });
 }

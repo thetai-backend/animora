@@ -359,6 +359,7 @@ model MedicalRecord {
 
   addendums        MedicalRecordAddendum[]
   emailLogs        EmailLog[]
+  notificationLogs NotificationLog[]
   invoice          Invoice?
 
   createdAt        DateTime                @default(now())
@@ -383,6 +384,25 @@ model EmailLog {
   createdAt       DateTime       @default(now())
 
   @@index([createdAt])
+}
+
+model NotificationLog {
+  id              String         @id @default(cuid())
+  medicalRecordId String?
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id], onDelete: SetNull)
+  recipientEmail  String
+  recipientName   String
+  petName         String?
+  subject         String
+  body            String
+  channel         String         @default("EMAIL")
+  status          String         @default("SENT")
+  sentById        String?
+  sentByName      String?
+  createdAt       DateTime       @default(now())
+
+  @@index([createdAt])
+  @@index([medicalRecordId])
 }
 
 model MedicalRecordAddendum {
@@ -510,8 +530,9 @@ model Invoice {
   cashReceived           Int?
   cashChange             Int?
 
-  // PENDING | PAID | CANCELLED
+  // PENDING | PAID | PARTIALLY_RETURNED | CANCELLED
   status                 String            @default("PENDING")
+  refundedAmount         Int               @default(0)
   paidAt                 DateTime?
   cancelledAt            DateTime?
   cancelReason           String?
@@ -541,6 +562,7 @@ model InvoiceItem {
   category          String
   unit              String   @default("Lần")
   quantity          Int      @default(1)
+  returnedQuantity  Int      @default(0)
   unitPrice         Int
   totalPrice        Int
   dosageInstruction String?
