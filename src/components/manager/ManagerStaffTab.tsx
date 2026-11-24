@@ -238,7 +238,7 @@ export function ManagerStaffTab({
                   minLength={editing ? undefined : 6}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="Animora@123"
+                  placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)"
                   className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-sm"
                 />
               </div>

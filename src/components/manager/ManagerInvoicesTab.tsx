@@ -616,7 +616,9 @@ export function ManagerInvoicesTab({
             })}
             {filteredInvoices.length === 0 && (
               <p className="py-8 text-center text-sm text-[#476268]">
-                Không tìm thấy hóa đơn phù hợp với bộ lọc.
+                {invoices.length === 0
+                  ? "Chưa có dữ liệu hóa đơn nào trong hệ thống."
+                  : "Không tìm thấy hóa đơn phù hợp với bộ lọc."}
               </p>
             )}
           </div>

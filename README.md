@@ -30,10 +30,8 @@
 6. [Thiết kế Cơ sở Dữ liệu (Database Schema & ERD)](#6-thiết-kế-cơ-sở-dữ-liệu-database-schema--erd)
 7. [Phân tích Nghiệp vụ, Ma trận Phân quyền (RBAC) & Luồng Vận hành](#7-phân-tích-nghiệp-vụ-ma-trận-phân-quyền-rbac--luồng-vận-hành)
 8. [Danh mục Màn hình & Hệ thống API (Routes Overview)](#8-danh-mục-màn-hình--hệ-thống-api-routes-overview)
-9. [Hướng dẫn Cài đặt, Cấu hình & Khởi chạy (Getting Started)](#9-hướng-dẫn-cài-đặt-cấu-hình--khởi-chạy-getting-started)
-10. [Tài khoản Mẫu Kiểm thử & Kịch bản Demo nhanh](#10-tài-khoản-mẫu-kiểm-thử--kịch-bản-demo-nhanh)
-11. [Thư viện Ảnh chụp Màn hình (Screenshots Showcase)](#11-thư-viện-ảnh-chụp-màn-hình-screenshots-showcase)
-12. [Định hướng Mở rộng & Triển khai Production](#12-định-hướng-mở-rộng--triển-khai-production)
+9. [Hướng dẫn Cài đặt, Nạp dữ liệu Danh mục & Khởi chạy cục bộ](#9-hướng-dẫn-cài-đặt-nạp-dữ-liệu-danh-mục--khởi-chạy-cục-bộ)
+10. [Chạy bằng Docker (All-in-One)](#10-chạy-bằng-docker-all-in-one)
 
 ---
 
@@ -147,7 +145,7 @@ Toàn bộ phiên bản dưới đây được đối chiếu trực tiếp từ
 | | **Lenis** | `^1.3.27` | Cuộn mượt vật lý độc lập dành riêng cho Trang Quảng cáo & Trang Chi tiết sản phẩm. |
 | **Database & ORM** | **Prisma** & `@prisma/client` | `^6.6.0` | ORM an toàn kiểu dữ liệu (custom output `.prisma/client-animora`), quản lý 23 Model và Transaction nguyên tử. |
 | | **SQLite** (Dev) / Sẵn sàng PostgreSQL | Built-in | Cơ sở dữ liệu cục bộ chạy ngay (`prisma/dev.db`), thiết kế schema chuẩn sẵn sàng chuyển sang PostgreSQL. |
-| | **tsx** | `^4.19.3` | Chạy trực tiếp script TypeScript `prisma/seed.ts` nạp dữ liệu mẫu. |
+| | **tsx** | `^4.19.3` | Chạy trực tiếp script TypeScript `prisma/seed.ts`, `prisma/seed-catalog.ts` và `prisma/reset-clean.ts`. |
 | **Biểu đồ & In ấn** | **Recharts** | `^3.11.0` | Vẽ biểu đồ xu hướng doanh thu, phân bổ tỷ trọng 3 mảng (*Y tế / Spa / Shop*) và hiệu suất Bác sĩ tại Dashboard Quản lý. |
 | | **CSS `@media print` (A4 Portrait)** | Native CSS | Xuất bản in sắc nét khổ giấy A4 trực tiếp từ trình duyệt không cần thư viện PDF nặng. |
 | **Xác thực & Dịch vụ tích hợp** | **jose** | `^6.0.10` | Ký & xác thực JWT (`HS256`, hiệu lực 7 ngày) tương thích Edge Runtime trong `src/middleware.ts`. |
@@ -219,8 +217,9 @@ animora-clinic/
 │   └── screenshots/                     # (Thư mục chứa ảnh chụp màn hình minh họa cho README)
 ├── prisma/
 │   ├── schema.prisma                    # Định nghĩa 23 Model cơ sở dữ liệu & các chỉ mục (indexes)
-│   ├── seed.ts                          # Script khởi tạo dữ liệu mẫu toàn diện (7 tài khoản, 11 dịch vụ, 14 sản phẩm, đa lô FEFO...)
-│   └── dev.db                           # File SQLite cục bộ sau khi db:push & db:seed
+│   ├── seed.ts                          # Khởi tạo database sạch (1 tài khoản Quản lý + ClinicSettings tối thiểu)
+│   ├── seed-catalog.ts                  # Nạp dữ liệu danh mục chân thực (Dịch vụ, Shop, Kho đa lô FEFO, Ưu đãi) — bảo toàn bảng User
+│   └── reset-clean.ts                   # Dọn sạch dữ liệu mẫu theo thứ tự khóa ngoại, chỉ giữ 1 Quản lý & cấu hình cơ bản
 ├── public/
 │   └── images/                          # Ảnh chân dung 3 bác sĩ, ảnh hero và ảnh sản phẩm Shop mẫu
 ├── src/
@@ -687,7 +686,56 @@ sequenceDiagram
 ---
 
 
-## 9. Chạy bằng Docker (All-in-One)
+## 9. Hướng dẫn Cài đặt, Nạp dữ liệu Danh mục & Khởi chạy cục bộ
+
+### 1. Cài đặt thư viện & biến môi trường
+
+Yêu cầu **Node.js 20+** và **npm**:
+
+```bash
+# Cài đặt dependencies
+npm install
+
+# Tạo file biến môi trường từ mẫu (không commit file .env thật lên Git)
+cp .env.example .env
+```
+
+Mở `.env` và thiết lập khóa `AUTH_SECRET` mạnh trước khi triển khai thực tế.
+
+### 2. Khởi tạo cơ sở dữ liệu & Nạp dữ liệu danh mục
+
+```bash
+# Đồng bộ schema SQLite và sinh Prisma Client
+npx prisma generate
+npm run db:push
+
+# Khởi tạo database sạch (1 tài khoản Quản lý + cấu hình phòng khám cơ bản)
+npm run db:seed
+
+# Nạp dữ liệu danh mục chân thực (12 dịch vụ Y tế & Spa, 16 sản phẩm Shop/Kho, 18 lô FEFO có 2 lô cận date, 3 sự kiện ưu đãi)
+# Lệnh chạy lặp lại an toàn (idempotent) và TUYỆT ĐỐI bảo toàn bảng User
+npm run seed:catalog
+```
+
+> **Dọn sạch dữ liệu về trạng thái trắng:** Khi cần xóa toàn bộ dữ liệu nghiệp vụ và chỉ giữ lại 1 tài khoản Quản lý, chạy `npm run db:clean`.
+
+### 3. Khởi chạy phát triển & Build Production
+
+```bash
+# Chế độ phát triển (Development)
+npm run dev
+
+# Kiểm tra kiểu TypeScript & Build Production
+npx tsc --noEmit
+npm run build
+npm run start
+```
+
+Truy cập ứng dụng tại **http://localhost:3000** và đăng nhập quản trị tại **http://localhost:3000/dang-nhap**.
+
+---
+
+## 10. Chạy bằng Docker (All-in-One)
 
 Toàn bộ ứng dụng **ANIMORA** (Next.js Standalone Frontend + Backend API + Prisma + SQLite Database đã nạp sẵn dữ liệu mẫu + tài nguyên tĩnh) được đóng gói gọn trong **duy nhất 1 Docker Container** với volume bền vững lưu dữ liệu phòng khám tại `./docker-data/animora.db`.
 

@@ -609,6 +609,13 @@ export function ManagerCmsTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#132A2E]/8">
+              {services.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-[#476268]">
+                    Chưa có dữ liệu dịch vụ — Vui lòng bấm &ldquo;+ Thêm dịch vụ mới&rdquo; để niêm yết lên Trang chủ.
+                  </td>
+                </tr>
+              )}
               {services.map((s) => (
                 <tr key={s.id} className={!s.isActive ? "bg-slate-100/70 opacity-75" : "hover:bg-[#FAF9F6]"}>
                   <td className="py-3 pr-3">
@@ -784,8 +791,18 @@ export function ManagerCmsTab({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {shopDisplayProducts.map((p) => (
+          {shopDisplayProducts.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[#0F766E]/25 bg-[#FAF9F6] p-10 text-center text-xs text-[#476268]">
+              <p className="text-sm font-bold text-[#132A2E]">
+                Chưa có dữ liệu sản phẩm Shop nào
+              </p>
+              <p className="mt-1">
+                Vui lòng bấm &ldquo;+ Thêm Sản phẩm Shop&rdquo; để tạo bài mô tả sản phẩm hiển thị trên Trang chủ.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              {shopDisplayProducts.map((p) => (
               <div
                 key={p.id}
                 className="flex gap-4 rounded-2xl border border-[#132A2E]/10 bg-[#FAF9F6] p-4 text-xs"
@@ -846,7 +863,8 @@ export function ManagerCmsTab({
                 </div>
               </div>
             ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1016,8 +1034,18 @@ export function ManagerCmsTab({
           <h3 className="text-base font-extrabold text-[#132A2E]">
             CMS Hồ sơ Đội ngũ Bác sĩ hiển thị trên Trang Quảng cáo
           </h3>
-          <div className="grid grid-cols-3 gap-4">
-            {doctors.map((doc) => (
+          {doctors.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[#0F766E]/25 bg-[#FAF9F6] p-10 text-center text-xs text-[#476268]">
+              <p className="text-sm font-bold text-[#132A2E]">
+                Chưa có dữ liệu hồ sơ Bác sĩ
+              </p>
+              <p className="mt-1">
+                Quản lý vui lòng tạo tài khoản vai trò Bác sĩ ở mục Nhân sự để cập nhật hồ sơ hiển thị trên Trang chủ.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-4">
+              {doctors.map((doc) => (
               <div
                 key={doc.id}
                 className="rounded-2xl border border-[#132A2E]/10 bg-[#FAF9F6] p-4 text-xs space-y-2"
@@ -1047,7 +1075,8 @@ export function ManagerCmsTab({
                 </button>
               </div>
             ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

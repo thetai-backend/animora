@@ -392,8 +392,18 @@ export function ManagerPromotionsTab({
       )}
 
       {/* Danh sách khuyến mãi */}
-      <div className="grid grid-cols-2 gap-4">
-        {promotions.map((p) => (
+      {promotions.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-[#0F766E]/25 bg-white p-12 text-center shadow-xs">
+          <p className="text-base font-bold text-[#132A2E]">
+            Chưa có dữ liệu sự kiện hoặc mã ưu đãi nào
+          </p>
+          <p className="mt-1 text-xs text-[#476268]">
+            Quản lý vui lòng bấm &ldquo;+ Tạo Sự kiện / Mã ưu đãi&rdquo; ở góc trên để thêm chương trình mới.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {promotions.map((p) => (
           <div
             key={p.id}
             className={`rounded-3xl border p-6 shadow-sm space-y-3 ${
@@ -473,7 +483,8 @@ export function ManagerPromotionsTab({
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

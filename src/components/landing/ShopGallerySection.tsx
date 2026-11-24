@@ -176,7 +176,16 @@ export function ShopGallerySection({
         </div>
 
         {/* Lưới sản phẩm Interactive Lookbook */}
-        {filteredProducts.length === 0 ? (
+        {products.length === 0 ? (
+          <div className="glass-medical-card mt-10 rounded-3xl p-14 text-center">
+            <p className="text-base font-bold text-[#132A2E]">
+              Chưa có dữ liệu sản phẩm tại Shop
+            </p>
+            <p className="mt-1.5 text-sm text-[#476268]">
+              Quản lý vui lòng thêm mới sản phẩm trưng bày trong trang Quản trị (mục Kho hoặc CMS).
+            </p>
+          </div>
+        ) : filteredProducts.length === 0 ? (
           <div className="glass-medical-card mt-10 rounded-3xl p-14 text-center">
             <p className="text-base font-bold text-[#132A2E]">
               Không tìm thấy sản phẩm phù hợp với bộ lọc hiện tại.

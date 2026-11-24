@@ -658,8 +658,12 @@ export function ManagerInventoryTab({
               <select
                 value={activeImportProductId}
                 onChange={(e) => setImportForm({ ...importForm, productId: e.target.value })}
-                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold"
+                disabled={products.filter((p) => p.isActive).length === 0}
+                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold disabled:opacity-60"
               >
+                {products.filter((p) => p.isActive).length === 0 && (
+                  <option value="">— Chưa có mặt hàng nào trong kho —</option>
+                )}
                 {products
                   .filter((p) => p.isActive)
                   .map((p) => (
@@ -738,7 +742,8 @@ export function ManagerInventoryTab({
 
             <button
               type="submit"
-              className="w-full rounded-xl bg-[#0F766E] py-3 text-sm font-extrabold text-white hover:bg-[#0B5D56]"
+              disabled={!activeImportProductId}
+              className="w-full rounded-xl bg-[#0F766E] py-3 text-sm font-extrabold text-white hover:bg-[#0B5D56] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Xác nhận Nhập lô vào kho
             </button>
@@ -826,7 +831,9 @@ export function ManagerInventoryTab({
                   {filteredProducts.length === 0 && (
                     <tr>
                       <td colSpan={5} className="py-8 text-center text-[#476268]">
-                        Không có mặt hàng nào khớp bộ lọc hiện tại.
+                        {products.length === 0
+                          ? "Chưa có dữ liệu mặt hàng trong kho — Vui lòng bấm \"+ Thêm mặt hàng mới\" để bắt đầu."
+                          : "Không có mặt hàng nào khớp bộ lọc hiện tại."}
                       </td>
                     </tr>
                   )}
@@ -1026,8 +1033,12 @@ export function ManagerInventoryTab({
               <select
                 value={activeInternalProductId}
                 onChange={(e) => setInternalForm({ ...internalForm, productId: e.target.value })}
-                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold"
+                disabled={products.filter((p) => p.isActive).length === 0}
+                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold disabled:opacity-60"
               >
+                {products.filter((p) => p.isActive).length === 0 && (
+                  <option value="">— Chưa có mặt hàng nào trong kho —</option>
+                )}
                 {products
                   .filter((p) => p.isActive)
                   .map((p) => (
@@ -1067,7 +1078,8 @@ export function ManagerInventoryTab({
               />
               <button
                 type="submit"
-                className="w-full rounded-xl bg-[#0F766E] py-2.5 text-xs font-extrabold text-white hover:bg-[#0B5D56]"
+                disabled={!activeInternalProductId}
+                className="w-full rounded-xl bg-[#0F766E] py-2.5 text-xs font-extrabold text-white hover:bg-[#0B5D56] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Xác nhận Phiếu xuất nội bộ (Trừ kho FEFO)
               </button>
@@ -1078,6 +1090,11 @@ export function ManagerInventoryTab({
                 Lịch sử Phiếu xuất nội bộ ({internalSlips.length})
               </h4>
               <div className="mt-3 max-h-80 space-y-2 overflow-y-auto text-xs">
+                {internalSlips.length === 0 && (
+                  <p className="py-6 text-center text-[#476268]">
+                    Chưa có phiếu xuất nội bộ nào được lập.
+                  </p>
+                )}
                 {internalSlips.map((s) => (
                   <div key={s.id} className="rounded-xl bg-[#FAF9F6] p-3">
                     <div className="flex justify-between font-bold text-[#0F766E]">
@@ -1136,8 +1153,12 @@ export function ManagerInventoryTab({
                 onChange={(e) =>
                   setDisposalForm({ ...disposalForm, productId: e.target.value, batchId: "" })
                 }
-                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold"
+                disabled={products.filter((p) => p.isActive).length === 0}
+                className="w-full rounded-xl border border-[#132A2E]/15 bg-[#FAF9F6] px-3 py-2 text-xs font-semibold disabled:opacity-60"
               >
+                {products.filter((p) => p.isActive).length === 0 && (
+                  <option value="">— Chưa có mặt hàng nào trong kho —</option>
+                )}
                 {products
                   .filter((p) => p.isActive)
                   .map((p) => (
@@ -1175,7 +1196,8 @@ export function ManagerInventoryTab({
               />
               <button
                 type="submit"
-                className="w-full rounded-xl bg-rose-600 py-2.5 text-xs font-extrabold text-white hover:bg-rose-700"
+                disabled={!activeDisposalProductId}
+                className="w-full rounded-xl bg-rose-600 py-2.5 text-xs font-extrabold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Xác nhận Phiếu xuất hủy / Kiểm kê
               </button>
@@ -1186,6 +1208,11 @@ export function ManagerInventoryTab({
                 Lịch sử Xuất hủy &amp; Điều chỉnh ({disposalSlips.length})
               </h4>
               <div className="mt-3 max-h-80 space-y-2 overflow-y-auto text-xs">
+                {disposalSlips.length === 0 && (
+                  <p className="py-6 text-center text-[#476268]">
+                    Chưa có phiếu xuất hủy hoặc điều chỉnh kiểm kê nào.
+                  </p>
+                )}
                 {disposalSlips.map((s) => (
                   <div key={s.id} className="rounded-xl bg-rose-50/60 p-3">
                     <div className="flex justify-between font-bold text-rose-700">

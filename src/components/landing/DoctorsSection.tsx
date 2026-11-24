@@ -35,8 +35,18 @@ export function DoctorsSection({ doctors }: { doctors: DoctorProfile[] }) {
           </p>
         </div>
 
-        <div className="mt-12 grid grid-cols-3 gap-8">
-          {doctors.map((doctor, index) => (
+        {doctors.length === 0 ? (
+          <div className="glass-medical-card mt-12 rounded-3xl p-12 text-center">
+            <p className="text-base font-bold text-[#132A2E]">
+              Chưa có dữ liệu đội ngũ Bác sĩ
+            </p>
+            <p className="mt-1.5 text-sm text-[#476268]">
+              Quản lý vui lòng thêm tài khoản Bác sĩ trong trang Quản trị để hiển thị hồ sơ chuyên khoa tại đây.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-12 grid grid-cols-3 gap-8">
+            {doctors.map((doctor, index) => (
             <motion.div
               key={doctor.id}
               initial={{ opacity: 0, y: 20 }}
@@ -137,7 +147,8 @@ export function DoctorsSection({ doctors }: { doctors: DoctorProfile[] }) {
               </div>
             </motion.div>
           ))}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );

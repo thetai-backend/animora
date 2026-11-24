@@ -667,48 +667,59 @@ export function BookingClient({
                   <p className="mb-2 text-xs font-bold text-[#132A2E]">
                     Chọn dịch vụ cho bé này:
                   </p>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {services.map((srv) => {
-                      const checked = draft.serviceIds.includes(srv.id);
-                      return (
-                        <button
-                          key={srv.id}
-                          type="button"
-                          onClick={() => toggleServiceForPet(draft.key, srv.id)}
-                          className={`flex items-start justify-between gap-2 rounded-xl border p-3 text-left transition ${
-                            checked
-                              ? "border-[#0F766E] bg-[#0F766E]/8"
-                              : "border-[#132A2E]/10 bg-white hover:border-[#0F766E]/40"
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              {srv.category === "MEDICAL" ? (
-                                <Stethoscope className="h-3.5 w-3.5 shrink-0 text-[#0F766E]" />
-                              ) : (
-                                <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#F97316]" />
-                              )}
-                              <span className="truncate text-xs font-bold text-[#132A2E]">
-                                {srv.name}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-[11px] text-[#476268]">
-                              {srv.durationMinutes} phút • {formatVnd(srv.price)}
-                            </p>
-                          </div>
-                          <span
-                            className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
+                  {services.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[#0F766E]/25 bg-white p-5 text-center text-xs text-[#476268]">
+                      <p className="font-bold text-[#132A2E]">
+                        Chưa có dữ liệu dịch vụ đang mở đặt lịch
+                      </p>
+                      <p className="mt-1">
+                        Quản lý vui lòng thêm mới dịch vụ trong trang Quản trị (mục CMS).
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {services.map((srv) => {
+                        const checked = draft.serviceIds.includes(srv.id);
+                        return (
+                          <button
+                            key={srv.id}
+                            type="button"
+                            onClick={() => toggleServiceForPet(draft.key, srv.id)}
+                            className={`flex items-start justify-between gap-2 rounded-xl border p-3 text-left transition ${
                               checked
-                                ? "border-[#0F766E] bg-[#0F766E] text-white"
-                                : "border-slate-300 bg-white"
+                                ? "border-[#0F766E] bg-[#0F766E]/8"
+                                : "border-[#132A2E]/10 bg-white hover:border-[#0F766E]/40"
                             }`}
                           >
-                            {checked ? "✓" : ""}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                {srv.category === "MEDICAL" ? (
+                                  <Stethoscope className="h-3.5 w-3.5 shrink-0 text-[#0F766E]" />
+                                ) : (
+                                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#F97316]" />
+                                )}
+                                <span className="truncate text-xs font-bold text-[#132A2E]">
+                                  {srv.name}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-[11px] text-[#476268]">
+                                {srv.durationMinutes} phút • {formatVnd(srv.price)}
+                              </p>
+                            </div>
+                            <span
+                              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
+                                checked
+                                  ? "border-[#0F766E] bg-[#0F766E] text-white"
+                                  : "border-slate-300 bg-white"
+                              }`}
+                            >
+                              {checked ? "✓" : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -772,29 +783,44 @@ export function BookingClient({
               </span>
             </div>
 
-            <div className="grid grid-cols-6 gap-2.5">
-              {slots.map((slot) => {
-                const isSelected = selectedTime === slot.time;
-                return (
-                  <button
-                    key={slot.time}
-                    type="button"
-                    disabled={!slot.available}
-                    onClick={() => setSelectedTime(slot.time)}
-                    title={slot.reason || "Còn trống"}
-                    className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition ${
-                      isSelected
-                        ? "border-[#F97316] bg-[#F97316] text-white shadow-md"
-                        : slot.available
-                        ? "border-[#0F766E]/25 bg-white text-[#132A2E] hover:border-[#0F766E] hover:bg-[#0F766E]/8"
-                        : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through"
-                    }`}
-                  >
-                    {slot.time}
-                  </button>
-                );
-              })}
-            </div>
+            {doctors.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[#0F766E]/25 bg-[#FAF9F6] p-6 text-center text-xs text-[#476268]">
+                <p className="font-bold text-[#132A2E]">
+                  Chưa có Bác sĩ trực khả dụng trong hệ thống
+                </p>
+                <p className="mt-1">
+                  Quản lý vui lòng thêm tài khoản Bác sĩ trong trang Quản trị để mở khung giờ đặt lịch trực tuyến.
+                </p>
+              </div>
+            ) : !loadingSlots && slots.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[#0F766E]/25 bg-[#FAF9F6] p-6 text-center text-xs text-[#476268]">
+                Chưa có khung giờ nào khả dụng cho ngày đã chọn.
+              </div>
+            ) : (
+              <div className="grid grid-cols-6 gap-2.5">
+                {slots.map((slot) => {
+                  const isSelected = selectedTime === slot.time;
+                  return (
+                    <button
+                      key={slot.time}
+                      type="button"
+                      disabled={!slot.available}
+                      onClick={() => setSelectedTime(slot.time)}
+                      title={slot.reason || "Còn trống"}
+                      className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition ${
+                        isSelected
+                          ? "border-[#F97316] bg-[#F97316] text-white shadow-md"
+                          : slot.available
+                          ? "border-[#0F766E]/25 bg-white text-[#132A2E] hover:border-[#0F766E] hover:bg-[#0F766E]/8"
+                          : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through"
+                      }`}
+                    >
+                      {slot.time}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="mt-5">
@@ -866,11 +892,15 @@ export function BookingClient({
 
           <button
             type="submit"
-            disabled={submitting}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#F97316] py-4 text-base font-extrabold text-white shadow-lg shadow-[#F97316]/25 transition hover:bg-[#EA580C] disabled:opacity-60"
+            disabled={submitting || services.length === 0 || doctors.length === 0}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#F97316] py-4 text-base font-extrabold text-white shadow-lg shadow-[#F97316]/25 transition hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-55"
           >
             <CalendarPlus className="h-5 w-5" />
-            {submitting ? "Đang xác nhận lịch..." : "Xác nhận Đặt lịch ngay"}
+            {submitting
+              ? "Đang xác nhận lịch..."
+              : services.length === 0 || doctors.length === 0
+              ? "Tạm chưa thể đặt lịch (chưa đủ dữ liệu)"
+              : "Xác nhận Đặt lịch ngay"}
           </button>
 
           <Link

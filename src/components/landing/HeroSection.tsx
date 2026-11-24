@@ -186,7 +186,7 @@ export function HeroSection({
                 </span>
               </div>
               <p className="tabular-nums-strict mt-1.5 font-heading text-lg font-extrabold text-[#132A2E]">
-                {doctorCount} Bác sĩ chính quy
+                {doctorCount > 0 ? `${doctorCount} Bác sĩ chính quy` : "Đang cập nhật"}
               </p>
               <p className="text-xs text-[#476268]">2 ca trực liên tục mỗi ngày</p>
             </div>
@@ -199,7 +199,7 @@ export function HeroSection({
                 </span>
               </div>
               <p className="tabular-nums-strict mt-1.5 font-heading text-lg font-extrabold text-[#132A2E]">
-                {serviceCount} Gói cố định
+                {serviceCount > 0 ? `${serviceCount} Gói cố định` : "Đang cập nhật"}
               </p>
               <p className="text-xs text-[#476268]">Niêm yết sẵn, không phát sinh</p>
             </div>

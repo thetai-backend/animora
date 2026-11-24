@@ -687,6 +687,13 @@ export function ManagerDashboardTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#132A2E]/8">
+                  {data.doctorStats.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-[#476268]">
+                        Chưa có dữ liệu Bác sĩ — Quản lý vui lòng thêm tài khoản Bác sĩ trong mục Nhân sự.
+                      </td>
+                    </tr>
+                  )}
                   {data.doctorStats.map((doc) => (
                     <tr key={doc.doctorId} className="hover:bg-[#FAF9F6]">
                       <td className="py-3 font-extrabold text-[#132A2E]">{doc.doctorName}</td>

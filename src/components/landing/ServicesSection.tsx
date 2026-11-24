@@ -297,27 +297,49 @@ export function ServicesSection({ services }: { services: ServiceItem[] }) {
 
         {/* Spatial Bento Grid (12 cột — 2 thẻ nổi bật đầu tiên 6-6 nếu tổng >= 5, hoặc 4-4-4 cân đối) */}
         <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.28 }}
-            className="mt-10 grid grid-cols-12 gap-6"
-          >
-            {visibleServices.map((service, idx) => {
-              const featured = visibleServices.length >= 5 && idx < 2;
-              return (
-                <SpatialServiceCard
-                  key={service.id}
-                  service={service}
-                  isSpa={service.category === "SPA"}
-                  featured={featured}
-                  onSelect={() => setSelectedService(service)}
-                />
-              );
-            })}
-          </motion.div>
+          {visibleServices.length === 0 ? (
+            <motion.div
+              key={`${activeTab}-empty`}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25 }}
+              className="glass-medical-card mt-10 rounded-3xl p-12 text-center"
+            >
+              <p className="text-base font-bold text-[#132A2E]">
+                {services.length === 0
+                  ? "Chưa có dữ liệu dịch vụ"
+                  : activeTab === "MEDICAL"
+                  ? "Chưa có dịch vụ Y tế nào được niêm yết"
+                  : "Chưa có dịch vụ Spa & Grooming nào được niêm yết"}
+              </p>
+              <p className="mt-1.5 text-sm text-[#476268]">
+                Quản lý vui lòng thêm mới dịch vụ và bảng giá trong trang Quản trị (mục CMS).
+              </p>
+            </motion.div>
+          ) : (
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.28 }}
+              className="mt-10 grid grid-cols-12 gap-6"
+            >
+              {visibleServices.map((service, idx) => {
+                const featured = visibleServices.length >= 5 && idx < 2;
+                return (
+                  <SpatialServiceCard
+                    key={service.id}
+                    service={service}
+                    isSpa={service.category === "SPA"}
+                    featured={featured}
+                    onSelect={() => setSelectedService(service)}
+                  />
+                );
+              })}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 

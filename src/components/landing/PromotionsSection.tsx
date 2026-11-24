@@ -142,7 +142,26 @@ export function PromotionsSection({
     return () => clearInterval(timer);
   }, [promotions.length]);
 
-  if (promotions.length === 0) return null;
+  if (promotions.length === 0) {
+    return (
+      <section id="uu-dai" className="scroll-mt-24 py-12">
+        <div className="mx-auto max-w-[1380px] px-6 xl:px-8">
+          <div className="glass-medical-card rounded-[28px] px-8 py-10 text-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F97316]/12 px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F97316]">
+              <Sparkles className="h-3.5 w-3.5" />
+              Sự kiện &amp; Ưu đãi
+            </span>
+            <p className="mt-3 text-base font-bold text-[#132A2E]">
+              Chưa có sự kiện ưu đãi nào đang diễn ra
+            </p>
+            <p className="mt-1 text-sm text-[#476268]">
+              Quản lý vui lòng thêm chương trình khuyến mãi mới trong trang Quản trị để hiển thị tại đây.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const activePromo = promotions[activeIndex % promotions.length];
 

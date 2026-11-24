@@ -404,6 +404,15 @@ export function ManagerRecordsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#132A2E]/8">
+                {filteredRecords.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-[#476268]">
+                      {records.length === 0
+                        ? "Chưa có hồ sơ ca khám S.O.A.P nào trong hệ thống."
+                        : "Không tìm thấy hồ sơ ca khám phù hợp với từ khóa."}
+                    </td>
+                  </tr>
+                )}
                 {filteredRecords.map((r) => (
                   <tr key={r.id} className="hover:bg-[#FAF9F6]">
                     <td className="py-3">
@@ -509,6 +518,15 @@ export function ManagerRecordsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#132A2E]/8">
+                {filteredPets.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-[#476268]">
+                      {pets.length === 0
+                        ? "Chưa có hồ sơ thú cưng nào trong hệ thống."
+                        : "Không tìm thấy thú cưng phù hợp với từ khóa."}
+                    </td>
+                  </tr>
+                )}
                 {filteredPets.map((pet) => (
                   <tr
                     key={pet.id}
@@ -589,6 +607,15 @@ export function ManagerRecordsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#132A2E]/8">
+                {filteredCustomers.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-[#476268]">
+                      {customers.length === 0
+                        ? "Chưa có hồ sơ khách hàng thành viên nào trong hệ thống."
+                        : "Không tìm thấy khách hàng phù hợp với từ khóa."}
+                    </td>
+                  </tr>
+                )}
                 {filteredCustomers.map((c) => (
                   <tr key={c.id} className="hover:bg-[#FAF9F6]">
                     <td className="py-3 font-extrabold text-[#132A2E]">{c.fullName}</td>
