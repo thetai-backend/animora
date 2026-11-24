@@ -686,3 +686,76 @@ sequenceDiagram
 
 ---
 
+
+## 9. Chạy bằng Docker (All-in-One)
+
+Toàn bộ ứng dụng **ANIMORA** (Next.js Standalone Frontend + Backend API + Prisma + SQLite Database đã nạp sẵn dữ liệu mẫu + tài nguyên tĩnh) được đóng gói gọn trong **duy nhất 1 Docker Container** với volume bền vững lưu dữ liệu phòng khám tại `./docker-data/animora.db`.
+
+### 1. Khởi chạy chỉ bằng 1 lệnh
+
+Yêu cầu cài sẵn [Docker Desktop](https://www.docker.com/products/docker-desktop/) (hoặc Docker Engine + Docker Compose v2). Không cần cài Node.js, Prisma hay tạo sẵn file `.env`:
+
+```bash
+docker compose up -d --build
+```
+
+Sau khi container khởi động (khoảng 10–20 giây ở lần chạy đầu tiên):
+- Truy cập ứng dụng tại: **http://localhost:3000**
+- Kiểm tra sức khỏe (Healthcheck): **http://localhost:3000/api/health** → trả về `{"status":"ok","app":"ANIMORA"}`
+- Ở lần chạy đầu tiên, `docker-entrypoint.mjs` tự động sao chép database mẫu đã seed sẵn vào `./docker-data/animora.db`. Các lần khởi động lại hoặc rebuild sau đó sẽ **giữ nguyên tuyệt đối** dữ liệu đang vận hành của phòng khám.
+
+> **Tùy chọn biến môi trường:** Nếu muốn cấu hình thêm `AUTH_SECRET`, `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GEMINI_API_KEY` hoặc `SMTP_*`, chỉ cần tạo file `.env` ngay thư mục gốc dự án — `docker-compose.yml` sẽ tự động nạp (và luôn cố định `DATABASE_URL=file:/app/data/animora.db` bên trong container).
+
+### 2. Xem log & quản lý container
+
+```bash
+# Xem log trực tiếp của container
+docker compose logs -f animora
+
+# Kiểm tra trạng thái container & healthcheck
+docker compose ps
+
+# Dừng container (không mất dữ liệu SQLite)
+docker compose down
+
+# Dừng và rebuild lại khi có cập nhật mã nguồn (vẫn giữ nguyên ./docker-data/animora.db)
+docker compose up -d --build
+```
+
+### 3. Sao lưu & khôi phục dữ liệu SQLite hàng ngày
+
+Toàn bộ dữ liệu phòng khám (khách hàng, thú cưng, lịch hẹn, bệnh án S.O.A.P, hóa đơn, kho FEFO) nằm trong duy nhất file **`./docker-data/animora.db`**:
+
+```bash
+# Sao lưu nhanh (Linux / macOS / Git Bash)
+cp docker-data/animora.db "backup-animora-$(date +%Y%m%d-%H%M).db"
+
+# Sao lưu nhanh (Windows PowerShell)
+Copy-Item .\docker-data\animora.db ".\backup-animora-$(Get-Date -Format 'yyyyMMdd-HHmm').db"
+```
+
+Để khôi phục từ bản sao lưu:
+```bash
+docker compose down
+# Ghi đè file backup vào docker-data/animora.db rồi bật lại
+docker compose up -d
+```
+
+### 4. Xuất file `.tar` mang sang máy tính khác (Offline / Không cần build lại)
+
+Trên máy đã build xong image `animora-clinic:latest`:
+
+```bash
+# Xuất Docker image ra file .tar
+docker save -o animora-clinic-allinone.tar animora-clinic:latest
+```
+
+Copy 2 file **`animora-clinic-allinone.tar`** và **`docker-compose.yml`** sang máy tính mới (có thể copy thêm thư mục `docker-data/` nếu muốn mang theo dữ liệu hiện có), sau đó chạy trên máy mới:
+
+```bash
+# Nạp image từ file .tar
+docker load -i animora-clinic-allinone.tar
+
+# Khởi chạy ngay lập tức (không cần build lại hay tải thư viện từ Internet)
+docker compose up -d --no-build
+```

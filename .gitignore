@@ -1,14 +1,9 @@
-<<<<<<< HEAD
-=======
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
->>>>>>> b68cdb58025d12c35b4a85645ae4977b7bb76a43
 # dependencies
 /node_modules
 /.pnp
 .pnp.*
-<<<<<<< HEAD
-=======
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -17,7 +12,6 @@
 
 # testing
 /coverage
->>>>>>> b68cdb58025d12c35b4a85645ae4977b7bb76a43
 
 # next.js
 /.next/
@@ -29,14 +23,6 @@
 # misc
 .DS_Store
 *.pem
-<<<<<<< HEAD
-npm-debug.log*
-.env*.local
-
-# prisma sqlite
-/prisma/dev.db
-/prisma/dev.db-journal
-=======
 
 # debug
 npm-debug.log*
@@ -48,19 +34,21 @@ yarn-error.log*
 .env*.local
 .env
 
+# prisma sqlite & docker runtime data
+/prisma/dev.db
+/prisma/dev.db-journal
+/prisma/template.db
+docker-data/
+
 # vercel
 .vercel
->>>>>>> b68cdb58025d12c35b4a85645ae4977b7bb76a43
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-<<<<<<< HEAD
-=======
 
 # cache
 .cache
 .eslintcache
 .turbo
 .swc
->>>>>>> b68cdb58025d12c35b4a85645ae4977b7bb76a43
